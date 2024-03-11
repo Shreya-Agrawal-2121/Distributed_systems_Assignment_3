@@ -73,7 +73,7 @@ def add_servers():
             
             # spawn a server container
             try:
-                client.containers.run(image=image, name=server_name, network=network, detach=True, environment={'SERVER_ID': server_id})
+                client.containers.run(image=image, name=server_name, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server_name})
             except Exception as e:
                 print(e)
                 response = {'message': '<Error> Failed to spawn new docker container', 
