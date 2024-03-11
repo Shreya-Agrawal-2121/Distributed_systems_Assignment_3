@@ -29,6 +29,11 @@ def query(sql):
 
 @app.route('/config', methods=['POST'])
 def config():
+    
+    #TODO: Add error handling like same column name or same shard name ,etc
+    # because marks will be deducted for that
+    # take it seriously
+
     data = request.get_json()
     schema = data['schema']
     shards = data['shards']
@@ -71,13 +76,14 @@ def heartbeat():
 
 @app.route('/copy', methods=['GET'])
 def copy():
+    #TODO: what if shard don't exist
     data = request.get_json()
     shards = data['shards']
     response_message = {}
     for shard in shards:
         response = []
         query(f"USE {shard}")
-        query(f"CREATE TABLE StudT LIKE StudT")
+        query(f"CREATE TABLE StudT LIKE StudT")  #@sherya: What are u doing here,please put light on it?
         result = query(f"SELECT * FROM StudT")
         for row in result:
             response.append(row)
@@ -89,6 +95,7 @@ def copy():
 
 @app.route('/read', methods=['POST'])
 def read():
+    #TODO: what if shard don't exist
     data = request.get_json()
     shard = data['shard']
     Stud_id = data['Stud_id']
@@ -115,17 +122,115 @@ def write():
     curr_idx = data['curr_idx']
     stud_data = data['data']
     query(f"USE {shard}")
-    #TODO: Complete this function
+
+    # check if size == curr_idx
+    result = query(f"SELECT COUNT(*) FROM StudT")
+    if result[0][0] != curr_idx:
+        response_data = {
+            "message": "Size does not match",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+
+    cnt = 0
+
+    for row in stud_data:
+        # check if student id exists
+        result = query(f"SELECT * FROM StudT WHERE id = {row[0]}")
+        if len(result) == 0:
+            query(f"INSERT INTO StudT VALUES {tuple(row)}")
+            cnt += 1
+    
+    response_data = {
+        "message": "Data entries added",
+        "current_idx": curr_idx + cnt,
+        "status": "success"
+    }
+    if cnt==0:
+        response_data = {
+            "message": "All Data entries already exists",
+            "current_idx": curr_idx,
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+    return jsonify(response_data), 200
+
 
 @app.route('/update', methods=['PUT'])
 def update():
-    pass
+    data = request.get_json()
+    shard = data['shard']
+    stud_id = data['stud_id']
+    new_data = data['new_data']
+
+    # check if student id matches with new data
+    if new_data[0] != stud_id:
+        response_data = {
+            "message": "Student id does not match with new data",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+
+    # if shard does not exist
+    result = query(f"SHOW DATABASES LIKE '{shard}'")
+    if len(result) == 0:
+        response_data = {
+            "message": "Shard does not exist",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+
+    query(f"USE {shard}")
+    result = query(f"SELECT * FROM StudT WHERE id = {stud_id}")
+    if len(result) == 0:
+        response_data = {
+            "message": "Student id does not exist",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+    
+    query(f"UPDATE StudT SET {new_data} WHERE id = {stud_id}")
+
+    response_data = {
+        "message": f"Data entry for Stud_id:{stud_id} updated",
+        "status": "success"
+    }
+    return jsonify(response_data), 200
 
 
 @app.route('/del', methods=['DELETE'])
 def delete():
-    pass
+    data = request.get_json()
+    shard = data['shard']
+    stud_id = data['stud_id']
 
+    # if shard does not exist
+    result = query(f"SHOW DATABASES LIKE '{shard}'")
+    if len(result) == 0:
+        response_data = {
+            "message": "Shard does not exist",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+
+    query(f"USE {shard}")
+    result = query(f"SELECT * FROM StudT WHERE id = {stud_id}")
+    if len(result) == 0:
+        response_data = {
+            "message": "Student id does not exist",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+    
+    query(f"DELETE FROM StudT WHERE id = {stud_id}")
+    response_data = {
+        "message": f"Data entry with Stud_id:{stud_id} removed",
+        "status": "success"
+    }
+    return jsonify(response_data), 200
+
+
+#TODO: Please add mutex lock in write,del,update,read,etc
 
 # main function
 if __name__ == '__main__':
