@@ -1,2 +1,2 @@
 .venv
-./server/test.py
+server/test.py
