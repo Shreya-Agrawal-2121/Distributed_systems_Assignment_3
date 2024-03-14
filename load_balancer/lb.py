@@ -183,7 +183,7 @@ def add_servers():
         "status": "successful"
     }
     return jsonify(response), 200
-# route /rm
+# TODO: Change this function @Amit @Jay
 @app.route('/rm', methods=['DELETE'])
 def remove_servers():
     # Get the number of servers to be removed and the hostnames of the servers
