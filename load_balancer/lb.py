@@ -13,7 +13,7 @@ app = Flask(__name__)
 # Initialize the ConsistentHashing class
 heartbeat_ptr=0
 ConsistentHashing = ConsistentHashing(3, 512, 9)
-
+hashmaps = {}
 # Initialize the Docker client
 client = docker.from_env()
 network = "n1"
@@ -22,86 +22,167 @@ image = "server"
 # Initialize the server_id to hostname and hostname to server_id mapping
 server_id_to_host = {}
 server_host_to_id = {}
-
-# route /rep 
-@app.route('/rep', methods=['GET'])
-def get_replicas():
-    # Get server containers hostnames and return the response
-    containers = client.containers.list(filters={'network':network})
-    response_data = {
-            "N": len(containers) - 1,
-            "replicas": [container.name for container in containers if container.name != "lb"]
-        }
-    response = {
-            "message": response_data,
-            "status": "successful"
-        }
-    return jsonify(response), 200
-
-
-# route /add
-@app.route('/add', methods=['POST'])
-def add_servers():
-    # Get the number of servers to be added and the hostnames of the servers
+shardT = {}
+mapT = {}
+N = 0
+schema = {}
+shards = []
+servers = {}
+@app.route('/init', metthods=['POST'])
+def init():
+    global N, schema, shards, servers
     data = request.get_json()
-    n = data['n']
-    hostnames = data['hostnames']
-
-    # If n is less than length of hostnames supplied return error
-    if(len(hostnames) > n):
-        response_data = {
-        "message" : "<Error> Length of hostname list is more than newly added instances",
-        "status" : "failure"
-    }
-        return jsonify(response_data), 400
-    else:
-        i = 0
-        while(i < n):
-            # Get server IDs for server
-            server_id = random.randint(100000, 999999)
-
-            # If server ID already exists , just continue
-            if server_id in server_id_to_host.keys():
-                continue
-            server_name = ''
-            
-            # If n > len(hostnames) generate hostnames based on server IDs
-            if i < len(hostnames) and hostnames[i] not in server_host_to_id.keys():
-                server_name = hostnames[i]
-            else:
-                server_name = "Server" + str(server_id)
-            
-            # spawn a server container
-            try:
-                client.containers.run(image=image, name=server_name, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server_name})
-            except Exception as e:
+    N = data['N']
+    schema = data['schema']
+    shards = data['shards']
+    servers = data['servers']
+    keys = list(servers.keys())
+    i = 0
+    while i < N:
+        servers = keys[i]
+        server_id = random.randint(100000, 999999)
+        if server_id in server_id_to_host.keys():
+            continue
+        try:
+                client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server})
+        except Exception as e:
                 print(e)
                 response = {'message': '<Error> Failed to spawn new docker container', 
                         'status': 'failure'}
                 return jsonify(response), 400
+        server_id_to_host[server_id] = server
+        server_host_to_id[server] = server_id
+        post_data = {
+            "schema": schema,
+            "shards": servers[server]
+        }
+        try :
+            container = client.containers.get(server)
+            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            url_redirect = f'http://{ip_addr}:5000/config'
+            requests.post(url_redirect, json=post_data)
+        except Exception as e:
+            print(e)
+            response_data = {'message': '<Error> Failed to redirect request', 
+                        'status': 'failure'}
             
-            # store id->hostname and hostname->id mapping
-            server_id_to_host[server_id] = server_name
-            server_host_to_id[server_name] = server_id
+            return jsonify(response_data), 400
+        shards_data = servers[server]
+        for shard in shards_data:
+            if shard not in mapT:
+                mapT[shard] = [server]
+            else:
+                mapT[shard].append(server)
+        i += 1
+    for shard in shards:
+        shard_id = shard['Shard_id']
+        low_id = shard['Stud_id_low']
+        shard['valid_idx'] = low_id
+        if shard_id in shardT:
+            continue
+        shardT[shard_id] = shard
+    for shard in mapT.keys():
+        cmap = ConsistentHashing(3, 512, 9)
+        for server in mapT[shard]:
+            server_id = server_host_to_id[server]
+            cmap.add_server(server_id)
+        hashmaps[shard] = cmap
+    response_data = {
+        'message' : "Configured database",
+        'status' : "successful" 
+    }
+    return jsonify(response_data), 200
 
-            # add the server to consistent hash table 
-            ConsistentHashing.add_server(server_id)
-
-            i = i + 1 # increment i
-
-        # Get server containers     
-        containers = client.containers.list(filters={'network':network})
-         # Return the response
-        response_data = {
-            "N": len(containers) - 1,
-            "replicas": [container.name for container in containers if container.name != "lb"]
-        }
-        response = {
-            "message": response_data,
-            "status": "successful"
-        }
-        return jsonify(response), 200
+@app.route('/status', methods=['GET'])
+def status():
+    response = {
+        "N": N,
+        "schema": schema,
+        "shards": shards,
+        "servers": servers
+    }
     
+    return jsonify(response), 200
+
+# route /add
+@app.route('/add', methods=['POST'])
+def add_servers():
+    global N, shards, shardT, servers, mapT, schema
+    data = request.get_json()
+    n = data['n']
+    new_shards = data['new_shards']
+    servers_new = data['servers']
+    if n > len(servers_new):
+        response_data = {
+            "message" : "<Error> Number of new servers (n) is greater than newly added instances",
+            "status" : "failure"
+        }
+        return jsonify(response_data), 400
+    i = 0
+    keys = list(servers_new.keys())
+    while i < n:
+        server = keys[i]
+        server_id = random.randint(100000, 999999)
+        if server_id in server_id_to_host.keys():
+            continue
+        try:
+                client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server})
+        except Exception as e:
+                print(e)
+                response = {'message': '<Error> Failed to spawn new docker container', 
+                        'status': 'failure'}
+                return jsonify(response), 400
+        server_id_to_host[server_id] = server
+        server_host_to_id[server] = server_id
+        post_data = {
+            "schema": schema,
+            "shards": servers_new[server]
+        }
+        try :
+            container = client.containers.get(server)
+            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            url_redirect = f'http://{ip_addr}:5000/config'
+            requests.post(url_redirect, json=post_data)
+        except Exception as e:
+            print(e)
+            response_data = {'message': '<Error> Failed to redirect request', 
+                        'status': 'failure'}
+            
+            return jsonify(response_data), 400
+        servers[server] = servers_new[server]
+        shard_data = servers_new[server]
+        for shard in shard_data:
+            if shard not in mapT:
+                mapT[shard] = [server]
+            else:
+                mapT[shard].append(server)
+        N += 1
+        i += 1
+    for new_shard in new_shards:
+        shard_id = new_shard['Shard_id']
+        low_id = new_shard['Stud_id_low']
+        new_shard['valid_idx'] = low_id
+        if shard_id in shardT:
+            continue
+        shardT[shard_id] = new_shard
+        shards.append(new_shard)
+    for shard in mapT.keys():
+        num = len(mapT[shard])
+        cmap = ConsistentHashing(num, 512, 9)
+        for server in mapT[shard]:
+            server_id = server_host_to_id[server]
+            cmap.add_server(server_id)
+        hashmaps[shard] = cmap
+    message = "Add "
+    for server in servers_new:
+        id = server_host_to_id[server]
+        message = message + "Server:" + id + " "
+    response = {
+        "N": N,
+        "message": message,
+        "status": "successful"
+    }
+    return jsonify(response), 200
 # route /rm
 @app.route('/rm', methods=['DELETE'])
 def remove_servers():
