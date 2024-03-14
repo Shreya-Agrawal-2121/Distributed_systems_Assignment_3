@@ -183,22 +183,24 @@ def add_servers():
         "status": "successful"
     }
     return jsonify(response), 200
-# TODO: Change this function @Amit @Jay
+
+
 @app.route('/rm', methods=['DELETE'])
 def remove_servers():
     # Get the number of servers to be removed and the hostnames of the servers
     data = request.get_json()
     n = data['n']
-    hostnames = data['hostnames']
+    server_names = data['servers']
 
-    # If n is less than length of hostnames supplied return error
-    if(len(hostnames) > n):
+    # if n is less than length of hostnames supplied return error
+    if(len(server_names) > n):
         response_data = {
-        "message" : "<Error> Length of hostname list is more than removable instances",
-        "status" : "failure"
-    }
+            "message" : "<Error> Length of server list is more than removable instances",
+            "status" : "failure"
+        }
         return jsonify(response_data), 400
-    
+
+
     # Get the list of existing server hostnames
     containers = client.containers.list(filters={'network':network})
     container_names = [container.name for container in containers if container.name != "lb"]
@@ -299,6 +301,98 @@ def read():
         "status": "successful"
     }
     return jsonify(response_data), 200
+
+
+
+# TODO: havent use mutex anywhere
+@app.route('/write', methods=['POST'])
+def write():
+    data = request.get_json()
+    data = data['data']
+    cnt=0
+    for entry in data:
+        shard = shardT[entry['Stud_id'] % N]        # TODO:needs to be modified, ho to do this
+        request_id = random.randint(100000, 999999)
+        server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
+        container = client.containers.get(server_id_to_host[server])
+        ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+        
+        url_redirect = f'http://{ip_addr}:5000/write'
+        
+        new_mp={}
+        new_mp['shard'] = shard['Shard_id']
+        new_mp['curr_idx'] = shard['valid_idx']
+        new_mp['data'] = entry
+        response = requests.post(url_redirect, json=new_mp)
+
+        if response.status_code == 200:
+            cnt += response.json()['current_idx']-shard['valid_idx']
+
+    response_data = {
+        "message" : "{} Data entries added".format(cnt),
+        "status" : "success"
+    }
+    return jsonify(response_data), 200
+
+
+@app.route('/update', methods=['PUT'])
+def update():
+    data = request.get_json()
+    shard = shardT[data['Stud_id'] % N]
+    request_id = random.randint(100000, 999999)
+    server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
+    container = client.containers.get(server_id_to_host[server])
+    ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+
+    url_redirect = f'http://{ip_addr}:5000/update'
+    new_data = {}
+    new_data['shard'] = shard['Shard_id']
+    new_data['Stud_id'] = data['Stud_id']
+    new_data['new_data'] = data['data']
+    response = requests.put(url_redirect, json=new_data)
+    if response.status_code == 200:
+        response_data = {
+            "message" : "Data entry for Stud_id: {} updated".format(data['Stud_id']),
+            "status" : "success"
+        }
+        return jsonify(response_data), 200
+    else:
+        response_data = {
+            "message" : response.json()['message'],
+            "status" : "failure"
+        }
+        return jsonify(response_data), 500
+    
+
+
+@app.route('/del', methods=['DELETE'])
+def delete():
+    data = request.get_json()
+    shard = shardT[data['Stud_id'] % N]
+    request_id = random.randint(100000, 999999)
+    server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
+    container = client.containers.get(server_id_to_host[server])
+    ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+
+    url_redirect = f'http://{ip_addr}:5000/del'
+    new_data = {}
+    new_data['shard'] = shard['Shard_id']
+    new_data['Stud_id'] = data['Stud_id']
+    response = requests.delete(url_redirect, json=new_data)
+    if response.status_code == 200:
+        response_data = {
+            "message" : "Data entry with Stud_id: {} removed from all replicas".format(data['Stud_id']),
+            "status" : "success"
+        }
+        return jsonify(response_data), 200
+    else:
+        response_data = {
+            "message" : response.json()['message'],
+            "status" : "failure"
+        }
+        return jsonify(response_data), 500
+
+
 # main function
 if __name__ == "__main__":
     # run a new process for heartbeat.py file
