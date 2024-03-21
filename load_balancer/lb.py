@@ -214,9 +214,9 @@ def remove_servers():
         return jsonify(response_data), 400
     
     # Get the number of extra servers to be removed
-    random_remove = n - len(hostnames)
-    extra_servers = list(set(container_names) - set(hostnames))
-    servers_rm = hostnames
+    random_remove = n - len(server_names)
+    extra_servers = list(set(container_names) - set(server_names))
+    servers_rm = server_names
 
     # Randomly sample from extra servers
     servers_rm += random.sample(extra_servers, random_remove)

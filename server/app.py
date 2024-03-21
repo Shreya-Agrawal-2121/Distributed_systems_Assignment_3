@@ -3,7 +3,6 @@ import os
 import mysql.connector
 from multiprocessing.dummy import Pool
 
-from .helper import DataHandler, SQLHandler
 app = Flask(__name__)
 
 # Get server ID from environment variable
