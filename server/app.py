@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request, redirect
 import os
-import mysql.connector
-from multiprocessing.dummy import Pool
+
 import sqlite3
 app = Flask(__name__)
 
@@ -34,13 +33,7 @@ def query(sql, database):
 def config():
     
     global columns, dtypes, column_list, mydb
-    data = {
-"schema":{"columns":["Stud_id","Stud_name","Stud_marks"],
-
-"dtypes":["Number","String","String"]},
-
-"shards":["sh1","sh2"]
- }
+    data = request.get_json()
     schema = data['schema']
     shards = data['shards']
     columns = schema['columns']
@@ -50,19 +43,19 @@ def config():
             "message": "Columns and datatypes do not match",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
     if len(shards) != len(set(shards)):
         response_data = {
             "message": "Shard names are not unique",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
     if len(columns) != len(set(columns)):
         response_data = {
             "message": "Column names are not unique",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
     column_list = ",".join(columns)
     try:
         message = ""
@@ -86,13 +79,13 @@ def config():
             "message": message,
             "status": "successful"
         }
-        return (response_data), 200
+        return jsonify(response_data), 200
     except Exception as e:
         response_data = {
             "message": str(e),
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
 
 # Heartbeat endpoint
 @app.route('/heartbeat', methods=['GET'])
@@ -102,15 +95,13 @@ def heartbeat():
         "message": "",
         "status": "successful"
     }
-    return (response_data), 200
+    return jsonify(response_data), 200
 
 @app.route('/copy', methods=['GET'])
 def copy():
     global columns, dtypes, column_list
 
-    data = {
-"shards":["sh1","sh2"]
-    }
+    data = request.get_json()
     shards = data['shards']
     global column_list
     response_message = {}
@@ -131,17 +122,14 @@ def copy():
             response.append(res)
         response_message[shard] = response
     response_message["status"] = "successful"    
-    return (response_message), 200
+    return jsonify(response_message), 200
 
 
 
 @app.route('/read', methods=['POST'])
 def read():
     global columns, dtypes, column_list
-    data = {
-    "shard":"sh1",
-    "Stud_id":{"low":1,"high":3}
-    }
+    data = request.get_json()
     shard = data['shard']
     Stud_id = data['Stud_id']
     low = Stud_id['low']
@@ -172,19 +160,13 @@ def read():
     
     }
     mydb.close()
-    return (response_data), 200
+    return jsonify(response_data), 200
 
 
 @app.route('/write', methods=['POST'])
 def write():
     global columns, dtypes, column_list
-    data = {
-    "shard":"sh1",
-    "curr_idx":0,
-    "data":[{"Stud_id":1,"Stud_name":"John","Stud_marks":"A"},
-            {"Stud_id":2,"Stud_name":"Doe","Stud_marks":"B"},
-            {"Stud_id":3,"Stud_name":"Jane","Stud_marks":"C"}]
-    }
+    data = request.get_json()
     shard = data['shard']
     curr_idx = data['curr_idx']
     stud_data = data['data']
@@ -199,7 +181,7 @@ def write():
             "message": "Size does not match",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
 
     cnt = 0
 
@@ -223,31 +205,26 @@ def write():
             "current_idx": curr_idx,
             "status": "failed"
         }
-        return (response_data), 500
-    return (response_data), 200
+        return jsonify(response_data), 500
+    return jsonify(response_data), 200
 
 
 @app.route('/update', methods=['PUT'])
 def update():
     global columns, dtypes, column_list
 
-    data = {
-    "shard":"sh1",
-    "Stud_id":1,
-    "new_data":{"Stud_id":1,"Stud_name":"John","Stud_marks":"A+"}
-    
-    }
+    data = request.get_json()
     shard = data['shard']
     stud_id = data['Stud_id']
-    new_data = data['new_data']
+    data = data['data']
 
     # check if student id matches with new data
-    if list(new_data.values())[0] != stud_id:
+    if list(data.values())[0] != stud_id:
         response_data = {
             "message": "Student id does not match with new data",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
 
     # if shard does not exist
     # result = query(f"SHOW DATABASES LIKE '{shard}'")
@@ -267,9 +244,9 @@ def update():
             "message": "Student id does not exist",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
     updated_data = ""
-    for key, value in new_data.items():
+    for key, value in data.items():
         updated_data += f"{key} = '{value}', "
     updated_data = updated_data[:-2]
     query(f"UPDATE StudT SET {updated_data} WHERE Stud_id = {stud_id}", shard_db)
@@ -279,16 +256,13 @@ def update():
         "message": f"Data entry for Stud_id:{stud_id} updated",
         "status": "success"
     }
-    return (response_data), 200
+    return jsonify(response_data), 200
 
 
 @app.route('/del', methods=['DELETE'])
 def delete():
     global columns, dtypes, column_list
-    data = {
-    "shard":"sh1",
-    "stud_id":1
-    }
+    data = request.get_json()
     shard = data['shard']
     stud_id = data['stud_id']
 
@@ -310,16 +284,16 @@ def delete():
             "message": "Student id does not exist",
             "status": "failed"
         }
-        return (response_data), 500
+        return jsonify(response_data), 500
     
     query(f"DELETE FROM StudT WHERE Stud_id = {stud_id}", shard_db)
     query(f"DETACH DATABASE '{shard}'", shard_db)
-
+    mydb.close()
     response_data = {
         "message": f"Data entry with Stud_id:{stud_id} removed",
         "status": "success"
     }
-    return (response_data), 200
+    return jsonify(response_data), 200
 
 
 # main function
