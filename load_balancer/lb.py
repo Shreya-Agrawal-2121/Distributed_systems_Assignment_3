@@ -44,7 +44,8 @@ def init_server():
         if server_id in server_id_to_host.keys():
             continue
         try:
-                client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server})
+                client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server,
+                }, ports={5000:None})
         except Exception as e:
                 print(e)
                 response = {'message': '<Error> Failed to spawn new container', 

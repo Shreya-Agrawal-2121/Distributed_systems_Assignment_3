@@ -8,6 +8,8 @@ services:
     serv:        
         build: ./server
         image: server
+        environment:
+            - PYTHONUNBUFFERED=1
     
     lb:
         build: ./load_balancer

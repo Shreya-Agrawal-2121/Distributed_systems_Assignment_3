@@ -11,7 +11,7 @@ db = []
 column_list = ""
 columns = []
 dtypes = []
-
+print(server_id, server_name)
 # Home endpoint
 def query(sql, database):
     global mydb
