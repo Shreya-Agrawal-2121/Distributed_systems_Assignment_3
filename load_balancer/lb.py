@@ -39,10 +39,16 @@ def init_server():
     keys = list(servers.keys())
     i = 0
     while i < N:
-        server = keys[i]
+        if i < len(keys):
+            server = keys[i]
+        else:
+            server = "Server#"
         server_id = random.randint(100000, 999999)
         if server_id in server_id_to_host.keys():
             continue
+        if i >= len(keys):
+            server = server + str(server_id)
+            keys.append(server)
         try:
                 client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server,
                 }, ports={5000:None})
@@ -53,6 +59,15 @@ def init_server():
                 return jsonify(response), 400
         server_id_to_host[server_id] = server
         server_host_to_id[server] = server_id
+        
+        shards_data = servers[server]
+        for shard in shards_data:
+            if shard not in mapT:
+                mapT[shard] = [server]
+            else:
+                mapT[shard].append(server)
+        i += 1
+    for server in keys:
         post_data = {
             "schema": schema,
             "shards": servers[server]
@@ -62,21 +77,15 @@ def init_server():
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
             print(ip_addr)
             print(post_data)
+            headers = {'content-type' : 'application/json'}
             url_redirect = f'http://{ip_addr}:5000/config'
-            requests.post(url_redirect, json=post_data)
+            requests.post(url_redirect, json=post_data, headers=headers)
         except Exception as e:
             print(e)
             response_data = {'message': '<Error> Failed to redirect request', 
                         'status': 'failure'}
             
             return jsonify(response_data), 400
-        shards_data = servers[server]
-        for shard in shards_data:
-            if shard not in mapT:
-                mapT[shard] = [server]
-            else:
-                mapT[shard].append(server)
-        i += 1
     for shard in shards:
         shard_id = shard['Shard_id']
         low_id = shard['Stud_id_low']
@@ -402,7 +411,7 @@ if __name__ == "__main__":
     absolute_path = os.path.dirname(__file__)
     relative_path = "./heartbeat.py"
     full_path = os.path.join(absolute_path, relative_path)
-    process = Popen(['python3', full_path], close_fds=True)
+    #process = Popen(['python3', full_path], close_fds=True)
     
     # run the flask app
     app.run(host='0.0.0.0', port=5000)
