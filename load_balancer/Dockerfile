@@ -1,26 +1,11 @@
-FROM mysql:8.0-debian
-
-COPY deploy.sh /always-initdb.d/
-COPY . /lb
+FROM ubuntu:20.04
 WORKDIR /lb
-
+COPY . .
 RUN apt-get update
-RUN apt-get install -y python3
-RUN apt-get install -y python3-pip
+RUN apt-get install -y python3 python3-pip
+RUN pip install --upgrade pip setuptools wheel
 
-RUN chmod +x /lb/custom-entry.sh
-
-ENV USER=theuser
-RUN adduser --home /home/$USER --disabled-password --gecos GECOS $USER \
-  && chsh -s /bin/zsh $USER
-RUN touch /lb/topicLog.db
-RUN chown $USER /lb/topicLog.db
-
-USER $USER
-ENV HOME=/home/$USER
-ENV MYSQL_ROOT_PASSWORD="abc"
-
+RUN pip install --no-cache-dir -r requirements.txt
+RUN  apt-get install -y sqlite3 libsqlite3-dev
 EXPOSE 5000
-
-ENTRYPOINT ["/lb/custom-entry.sh"]
-CMD ["mysqld"]
+CMD ["python3", "lb.py"]

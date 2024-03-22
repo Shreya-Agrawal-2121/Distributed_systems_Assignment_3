@@ -28,8 +28,8 @@ N = 0
 schema = {}
 shards = []
 servers = {}
-@app.route('/init', metthods=['POST'])
-def init():
+@app.route('/init', methods=['POST'])
+def init_server():
     global N, schema, shards, servers
     data = request.get_json()
     N = data['N']
@@ -39,7 +39,7 @@ def init():
     keys = list(servers.keys())
     i = 0
     while i < N:
-        servers = keys[i]
+        server = keys[i]
         server_id = random.randint(100000, 999999)
         if server_id in server_id_to_host.keys():
             continue
@@ -47,7 +47,7 @@ def init():
                 client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server})
         except Exception as e:
                 print(e)
-                response = {'message': '<Error> Failed to spawn new docker container', 
+                response = {'message': '<Error> Failed to spawn new container', 
                         'status': 'failure'}
                 return jsonify(response), 400
         server_id_to_host[server_id] = server
@@ -59,6 +59,8 @@ def init():
         try :
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            print(ip_addr)
+            print(post_data)
             url_redirect = f'http://{ip_addr}:5000/config'
             requests.post(url_redirect, json=post_data)
         except Exception as e:

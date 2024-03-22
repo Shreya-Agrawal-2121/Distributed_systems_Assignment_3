@@ -2,7 +2,7 @@ build:
 	sudo docker-compose build
 
 run_lb:
-	sudo docker-compose up lb
+	sudo docker compose up lb
 
 run_servers:
 	curl -X POST -H "Content-Type: application/json" -d '{"n": 3, "hostnames": ["s1", "s2", "s3"]}' http://localhost:5000/add
