@@ -5,14 +5,13 @@ import random
 import requests
 from subprocess import Popen
 from consistentHashing import ConsistentHashing
-
+import time
 
 # Initialize the Flask application
 app = Flask(__name__)
 
 # Initialize the ConsistentHashing class
 heartbeat_ptr=0
-ConsistentHashing = ConsistentHashing(3, 512, 9)
 hashmaps = {}
 # Initialize the Docker client
 client = docker.from_env()
@@ -67,6 +66,7 @@ def init_server():
             else:
                 mapT[shard].append(server)
         i += 1
+        time.sleep(1)
     for server in keys:
         post_data = {
             "schema": schema,
@@ -86,6 +86,7 @@ def init_server():
                         'status': 'failure'}
             
             return jsonify(response_data), 400
+        time.sleep(1)
     for shard in shards:
         shard_id = shard['Shard_id']
         low_id = shard['Stud_id_low']
@@ -150,6 +151,7 @@ def add_servers():
             "schema": schema,
             "shards": servers_new[server]
         }
+        time.sleep(1)
         try :
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
@@ -168,6 +170,7 @@ def add_servers():
                 mapT[shard] = [server]
             else:
                 mapT[shard].append(server)
+        time.sleep(1)
         N += 1
         i += 1
     for new_shard in new_shards:
@@ -245,7 +248,7 @@ def remove_servers():
     # Delete the hash map entry of server id and host names and stop and remove the correpsonding server conatiner
     for server in servers_rm:
         # remove virtual server entries of server from consistent hash map
-        ConsistentHashing.remove_server(server_host_to_id[server])
+        
 
         # remove server from server_id_to_host and server_host_to_id
         server_id = server_host_to_id[server]
@@ -255,10 +258,15 @@ def remove_servers():
             container = client.containers.get(server)
             container.stop()
             container.remove()
-            
             # if successfully removed, remove server from server_id_to_host and server_host_to_id
             server_host_to_id.pop(server)
             server_id_to_host.pop(server_id)
+            for shard in servers[server]:
+                mapT[shard].remove(server)
+                hashmaps[shard].remove_server(server_id)
+            servers.pop(server)
+            time.sleep(1)
+
         except Exception as e:
             print(e)
             response_data = {'message': '<Error> Failed to remove docker container', 
@@ -350,68 +358,80 @@ def write():
 @app.route('/update', methods=['PUT'])
 def update():
     data = request.get_json()
-    shard = shardT[data['Stud_id'] % N]
-    request_id = random.randint(100000, 999999)
-    server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
-    container = client.containers.get(server_id_to_host[server])
-    ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
-
-    url_redirect = f'http://{ip_addr}:5000/update'
-    new_data = {}
-    new_data['shard'] = shard['Shard_id']
-    new_data['Stud_id'] = data['Stud_id']
-    new_data['new_data'] = data['data']
-    response = requests.put(url_redirect, json=new_data)
-    if response.status_code == 200:
+    Stud_id = data['Stud_id']
+    shard = ''
+    new_data = data['data']
+    for shard_id in shardT.keys():
+        if Stud_id >= shardT[shard_id]['Stud_id_low'] and Stud_id < shardT[shard_id]['Stud_id_low'] + shardT[shard_id]['Shard_size']:
+            shard = shard_id
+            break
+    if shard_id == '':
         response_data = {
-            "message" : "Data entry for Stud_id: {} updated".format(data['Stud_id']),
-            "status" : "success"
+            "message" : "Data entry does not exist",
+            "status" : "failed"
         }
-        return jsonify(response_data), 200
-    else:
-        response_data = {
-            "message" : response.json()['message'],
-            "status" : "failure"
-        }
-        return jsonify(response_data), 500
-    
-
+        return jsonify(response_data), 400
+    for server in mapT[shard]:
+        try:
+            container = client.containers.get(server)
+            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            url_redirect = f'http://{ip_addr}:5000/update'
+            data = {
+                "shard":shard,
+                "Stud_id":Stud_id,
+                "data":new_data
+            }
+            requests.put(url_redirect, json=data)
+        except Exception as e:
+            print(e)
+            response_data = {'message': '<Error> Failed to update server', 
+                        'status': 'failure'}
+            return jsonify(response_data), 400
+    response_data = {
+        "message":f"Data entry with Stud_id: {Stud_id} updated",
+        "status":"success"
+    }
+    return jsonify(response_data), 200
 
 @app.route('/del', methods=['DELETE'])
 def delete():
     data = request.get_json()
-    shard = shardT[data['Stud_id'] % N]
-    request_id = random.randint(100000, 999999)
-    server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
-    container = client.containers.get(server_id_to_host[server])
-    ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
-
-    url_redirect = f'http://{ip_addr}:5000/del'
-    new_data = {}
-    new_data['shard'] = shard['Shard_id']
-    new_data['Stud_id'] = data['Stud_id']
-    response = requests.delete(url_redirect, json=new_data)
-    if response.status_code == 200:
+    Stud_id = data['Stud_id']
+    shard = ''
+    for shard_id in shardT.keys():
+        if Stud_id >= shardT[shard_id]['Stud_id_low'] and Stud_id < shardT[shard_id]['Stud_id_low'] + shardT[shard_id]['Shard_size']:
+            shard = shard_id
+            break
+    if shard_id == '':
         response_data = {
-            "message" : "Data entry with Stud_id: {} removed from all replicas".format(data['Stud_id']),
-            "status" : "success"
+            "message" : "Data entry does not exist",
+            "status" : "failed"
         }
-        return jsonify(response_data), 200
-    else:
-        response_data = {
-            "message" : response.json()['message'],
-            "status" : "failure"
-        }
-        return jsonify(response_data), 500
+        return jsonify(response_data), 400
+    for server in mapT[shard]:
+        try:
+            container = client.containers.get(server)
+            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            url_redirect = f'http://{ip_addr}:5000/del'
+            data = {
+                "shard":shard,
+                "Stud_id":Stud_id
+            }
+            requests.delete(url_redirect, json=data)
+        except Exception as e:
+            print(e)
+            response_data = {'message': '<Error> Failed to delete server', 
+                        'status': 'failure'}
+            return jsonify(response_data), 400
+    response_data = {
+        "message":f"Data entry with Stud_id: {Stud_id} removed from all replicas",
+        "status":"success"
+    }
+    return jsonify(response_data), 200
 
 
 # main function
 if __name__ == "__main__":
-    # run a new process for heartbeat.py file
-    absolute_path = os.path.dirname(__file__)
-    relative_path = "./heartbeat.py"
-    full_path = os.path.join(absolute_path, relative_path)
-    #process = Popen(['python3', full_path], close_fds=True)
     
     # run the flask app
     app.run(host='0.0.0.0', port=5000)
