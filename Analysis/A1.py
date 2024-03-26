@@ -89,3 +89,160 @@ plot_line_chart(x_values=None, y_values=write_time, x_label="Request", y_label="
 
 # Measure time taken to send POST requests
 # print(f"Read speed for 10,000 reads: {read_time} seconds")
+
+
+
+## SUBTASK 1
+# payload = {
+#     "N": 3,
+#     "schema": {
+#         "columns": [
+#             "Stud_id",
+#             "Stud_name",
+#             "Stud_marks"
+#         ],
+#         "dtypes": [
+#             "Number",
+#             "String",
+#             "String"
+#         ]
+#     },
+#     "shards": [
+#         {
+#             "Stud_id_low": 0,
+#             "Shard_id": "sh1",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 4096,
+#             "Shard_id": "sh2",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 8192,
+#             "Shard_id": "sh3",
+#             "Shard_size": 4096
+#         }
+#     ],
+#     "servers": {
+#         "Server0": [
+#             "sh1",
+#             "sh2"
+#         ],
+#         "Server1": [
+#             "sh2",
+#             "sh3"
+#         ],
+#         "Server2": [
+#             "sh1",
+#             "sh3"
+#         ]
+#     }
+# }
+
+# ## SUBTASK 2
+# payload = {
+#     "N": 3,
+#     "schema": {
+#         "columns": [
+#             "Stud_id",
+#             "Stud_name",
+#             "Stud_marks"
+#         ],
+#         "dtypes": [
+#             "Number",
+#             "String",
+#             "String"
+#         ]
+#     },
+#     "shards": [
+#         {
+#             "Stud_id_low": 0,
+#             "Shard_id": "sh1",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 4096,
+#             "Shard_id": "sh2",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 8192,
+#             "Shard_id": "sh3",
+#             "Shard_size": 4096
+#         }
+#     ],
+#     "servers": {
+#         "Server0": [
+#             "sh1",
+#             "sh2"
+#         ],
+#         "Server1": [
+#             "sh2",
+#             "sh3"
+#         ],
+#         "Server2": [
+#             "sh1",
+#             "sh3"
+#         ]
+#     }
+# }
+
+## SUBTASK 3
+# payload = {
+#     "N": 3,
+#     "schema": {
+#         "columns": [
+#             "Stud_id",
+#             "Stud_name",
+#             "Stud_marks"
+#         ],
+#         "dtypes": [
+#             "Number",
+#             "String",
+#             "String"
+#         ]
+#     },
+#     "shards": [
+#         {
+#             "Stud_id_low": 0,
+#             "Shard_id": "sh1",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 4096,
+#             "Shard_id": "sh2",
+#             "Shard_size": 4096
+#         },
+#         {
+#             "Stud_id_low": 8192,
+#             "Shard_id": "sh3",
+#             "Shard_size": 4096
+#         }
+#     ],
+#     "servers": {
+#         "Server0": [
+#             "sh1",
+#             "sh2"
+#         ],
+#         "Server1": [
+#             "sh2",
+#             "sh3"
+#         ],
+#         "Server2": [
+#             "sh1",
+#             "sh3"
+#         ]
+#     }
+# }
+
+# for n in range(3, 11):
+#     rtime, wtime = launch_rw_requests()
+#     write_times[n] = {"total": np.sum(wtime), "mean": np.mean(
+#         wtime), "error": np.std(wtime)}
+#     read_times[n] = {"total": np.sum(rtime), "mean": np.mean(
+#         rtime), "error": np.std(rtime)}
+#     payload = {}
+#     response = requests.post(base_url + "/add", json=payload)
+#     if response.status_code != 200:
+#         print("Error:", response.text)
