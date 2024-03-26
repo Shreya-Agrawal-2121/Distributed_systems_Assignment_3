@@ -1,53 +1,44 @@
-# write a python script to launch 1000 async requests to (url):
+import requests
+import random
+import time
 
-import asyncio
-import aiohttp
-import matplotlib.pyplot as plt
+# Function to send POST requests
+def send_post_request(data, endpoint):
+    url = 'http://localhost:5000/' + endpoint
+    headers = {'Content-Type': 'application/json'}
+    response = requests.post(url, json=data, headers=headers)
+    return response
 
-# write a function to launch a get request to the url and return the response
-async def fetch(session, url):
-    async with session.get(url) as response:
-        return await response.json()
+# Function to generate random student IDs
+def generate_random_student_ids(max_id, num_ids):
+    return random.sample(range(max_id), num_ids)
 
-def extract_server_id(response):
+# Function to send multiple POST requests
+def send_multiple_write_requests(data_list):
+    start_time = time.time()
+    for data in data_list:
+        send_post_request(data, '/write')
+    end_time = time.time()
+    return end_time - start_time
 
-    # Extract server ID from the message
-    message = response["message"]
-    server_id = message.split(":")[1].strip()
-    
-    return server_id
-    
-async def main():
+def send_multiple_read_requests(data_list):
+    start_time = time.time()
+    for data in data_list:
+        payload_json = {"low": data["Stud_id"], "high": data["Stud_id"]}
+        response = send_post_request(payload_json, '/read')
+    end_time = time.time()
+    return end_time - start_time
 
-    # launch a GET request to the url
-    url = 'http://localhost:5000/home'
+# Generate 10,000 random student IDs
+student_ids = generate_random_student_ids(12201, 10000)
 
-    # store the count of serverid responses in a dictionary
+# Prepare sample data and send POST requests
+sample_data_list = [{"Stud_id": stud_id, "Stud_name": "GHI", "Stud_marks": 27} for stud_id in student_ids]
 
-    freq = {}
+# Measure time taken to send POST requests
+write_time = send_multiple_write_requests(sample_data_list)
+print(f"Write speed for 10,000 writes: {write_time} seconds")
 
-    for i in range(10000):
-        async with aiohttp.ClientSession() as session:
-            response = await fetch(session, url)
-            
-            serverid = extract_server_id(response)
-            freq[serverid] = freq.get(serverid, 0) + 1
-
-    # draw a bar graph of the frequency of each serverid
-    # and label the x-axis with the serverid and the y-axis with the frequency
-    plt.bar(freq.keys(), freq.values())
-    # Add the values on top of the bars
-    for server_id, frequency in freq.items():
-        plt.text(server_id, frequency + 0.1, str(frequency), ha='center', va='bottom')
-
-    plt.xlabel('Server ID')
-    plt.ylabel('Frequency')
-    
-    # print the graph
-    # plt.show()
-    plt.savefig('A1.png')
-
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+# Measure time taken to send POST requests
+read_time = send_multiple_read_requests(sample_data_list)
+print(f"Read speed for 10,000 reads: {read_time} seconds")
