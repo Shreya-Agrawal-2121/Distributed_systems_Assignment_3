@@ -32,8 +32,23 @@ def send_multiple_read_requests(data_list):
 # Generate 10,000 random student IDs
 student_ids = generate_random_student_ids(12201, 10000)
 
+# generate 10000 random 4 letter names and marks
+student_marks = [random.randint(0, 100) for _ in range(10000)]
+
+student_names = []
+for i in range(10000):
+    student_names.append(''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=4)))
+
+# print first 10 student details
+# print(student_ids[:10])
+# print(student_names[:10])
+# print(student_marks[:10])
+
+
 # Prepare sample data and send POST requests
-sample_data_list = [{"Stud_id": stud_id, "Stud_name": "GHI", "Stud_marks": 27} for stud_id in student_ids]
+sample_data_list = []
+for i in range(10000):
+    sample_data_list.append({"Stud_id": student_ids[i], "Stud_name": student_names[i], "Stud_marks": student_marks[i]})
 
 # Measure time taken to send POST requests
 write_time = send_multiple_write_requests(sample_data_list)
