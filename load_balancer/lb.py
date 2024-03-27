@@ -6,7 +6,8 @@ import requests
 from subprocess import Popen
 from consistentHashing import ConsistentHashing
 import time
-
+from threading import Thread
+from threading import Lock
 # Initialize the Flask application
 app = Flask(__name__)
 
@@ -27,6 +28,42 @@ N = 0
 schema = {}
 shards = []
 servers = {}
+locks = {}
+def write_to_servers(*args):
+    shard = args[0]
+    data = args[1]
+    lock = locks[shard]
+    lock.acquire()
+    valid_id = 0
+    shd = None
+    for sh in shards:
+        if shard == sh['Shard_id']:
+            valid_id = sh['valid_idx']
+            shd = sh
+            break
+    for server in mapT[shard]:
+        try:
+            container = client.containers.get(server)
+            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            url_redirect = f'http://{ip_addr}:5000/write'
+            request_data = {
+                "shard": shard,
+                "curr_idx": valid_id,
+                "data": data
+            }
+            requests.post(url_redirect, json=request_data)
+            time.sleep(1)
+        except Exception as e:
+            print(e)
+            lock.release()
+            response_data = {'message': '<Error> Failed to write to server', 
+                        'status': 'failure'}
+            return jsonify(response_data), 400
+    for sh in shards:
+        if shard == sh['Shard_id']:
+            sh['valid_idx'] += len(data)
+            break
+    lock.release()
 @app.route('/init', methods=['POST'])
 def init_server():
     global N, schema, shards, servers
@@ -96,6 +133,8 @@ def init_server():
         shardT[shard_id] = shard
     for shard in mapT.keys():
         cmap = ConsistentHashing(3, 512, 9)
+        mutex_lock = Lock()
+        locks[shard] = mutex_lock
         for server in mapT[shard]:
             server_id = server_host_to_id[server]
             cmap.add_server(server_id)
@@ -185,6 +224,8 @@ def add_servers():
         num = len(mapT[shard])
         cmap = ConsistentHashing(num, 512, 9)
         for server in mapT[shard]:
+            mutex_lock = Lock()
+            locks[shard] = mutex_lock
             server_id = server_host_to_id[server]
             cmap.add_server(server_id)
         hashmaps[shard] = cmap
@@ -203,6 +244,7 @@ def add_servers():
 @app.route('/rm', methods=['DELETE'])
 def remove_servers():
     # Get the number of servers to be removed and the hostnames of the servers
+    global N
     data = request.get_json()
     n = data['n']
     server_names = data['servers']
@@ -275,6 +317,7 @@ def remove_servers():
         
     # Get server containers hostnames and return the response
     containers = client.containers.list(filters={'network':network})
+    N = len(containers) - 1
     response_data = {
             "N": len(containers) - 1,
             "replicas": [container.name for container in containers if container.name != "lb"]
@@ -345,42 +388,21 @@ def write():
     data = request.get_json()
     data = data['data']
     cnt=0
+    writes = {}
     for entry in data:
         shard_id = ''
-        for shard in shards:
-            if entry['Stud_id'] >= shard['Stud_id_low'] and entry['Stud_id'] < shard['Stud_id_low'] + shard['Shard_size']:
-                tmp=shard
-                shard_id = shard['Shard_id']
+        for shard in shardT.keys():
+            if entry['Stud_id'] >= shardT[shard]['Stud_id_low'] and entry['Stud_id'] < shardT[shard]['Stud_id_low'] + shardT[shard]['Shard_size']:
+                if shard not in writes.keys():
+                    writes[shard] = []
+                    writes[shard].append(entry)
+                else:
+                    writes[shard].append(entry)
                 break
-        shard=tmp
-        request_id = random.randint(100000, 999999)
-        server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
-        container = client.containers.get(server_id_to_host[server])
-        ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
-        
-        url_redirect = f'http://{ip_addr}:5000/write'
-        
-        new_mp={}
-        new_mp['shard'] = shard['Shard_id']
-        new_mp['curr_idx'] = shard['valid_idx']
-        new_mp['data'] = entry
-        response = requests.post(url_redirect, json=new_mp)
-
-        # print(response.json())
-        if response.status_code == 200:
-            cnt += response.json()['current_idx']-shard['valid_idx']
-            # for server in mapT[shard['Shard_id']]:
-            #     container = client.containers.get(server)
-            #     ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
-            #     url_redirect = f'http://{ip_addr}:5000/update'
-            #     data = {
-            #         "shard":shard['Shard_id'],
-            #         "Stud_id":response.json()['current_idx'],
-            #         "data":entry
-            #     }
-            #     requests.put(url_redirect, json=data)
-            
-            # shard['valid_idx'] = response.json()['current_idx']
+        cnt += 1
+    for shard in writes.keys():
+        thread = Thread(target=write_to_servers, args=(shard, writes[shard]))
+        thread.start()
 
 
     response_data = {
@@ -417,6 +439,7 @@ def update():
                 "data":new_data
             }
             requests.put(url_redirect, json=data)
+            time.sleep(1)
         except Exception as e:
             print(e)
             response_data = {'message': '<Error> Failed to update server', 
@@ -453,6 +476,7 @@ def delete():
                 "Stud_id":Stud_id
             }
             requests.delete(url_redirect, json=data)
+            time.sleep(1)
         except Exception as e:
             print(e)
             response_data = {'message': '<Error> Failed to delete server', 
