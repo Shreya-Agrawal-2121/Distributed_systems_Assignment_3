@@ -2,10 +2,11 @@ build:
 	sudo docker-compose build
 
 run_lb:
-	sudo docker compose up lb
+	sudo docker-compose up lb
 
-run_servers:
-	curl -X POST -H "Content-Type: application/json" -d '{"n": 3, "hostnames": ["s1", "s2", "s3"]}' http://localhost:5000/add
+clean_containers:
+	for container in $$(sudo docker ps -a -q); do sudo docker stop $$container; done
+	for container in $$(sudo docker ps -a -q); do sudo docker rm $$container; done
 
 stop:
 	for container in $$(sudo docker ps -q); do sudo docker stop $$container; done
@@ -14,3 +15,7 @@ stop:
 rm:
 	for image in $$(sudo docker images -q); do sudo docker rmi $$image; done
 	sudo docker system prune -f
+
+# sudo docker rm $(sudo docker ps -aq)
+# if stops doesnot works, ```sudo aa-remove-unknown```
+# sudo docker stop $(sudo docker ps -aq)

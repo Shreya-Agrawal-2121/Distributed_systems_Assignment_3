@@ -191,7 +191,7 @@ def add_servers():
     message = "Add "
     for server in servers_new:
         id = server_host_to_id[server]
-        message = message + "Server:" + id + " "
+        message = message + "Server:" + str(id) + " "
     response = {
         "N": N,
         "message": message,
@@ -322,8 +322,23 @@ def read():
     }
     return jsonify(response_data), 200
 
+#  {
+#  "data": [{"Stud_id":2255,"Stud_name":"GHI","Stud_marks":27},
+#  {"Stud_id":3524,"Stud_name":"JKBFSFS","Stud_marks":56},
+#  {"Stud_id":1005,"Stud_name":"YUBAAD","Stud_marks":100}] /* 100 entries */
+#  }
 
-
+# This endpoint writes data entries in the distributed database. The endpoint expects
+# multiple entries that are to be written in the server containers. 
+# The load balancer schedules each write to its corresponding
+# shard replicas and ensures data consistency using mutex locks for a particular 
+# shard and its replicas. The general write
+# work flow will be like: (1) Get Shard ids from Stud ids and group writes for 
+# each shard → For each shard Do:
+# (2a)Take mutex lock for Shard id (m) → (2b) Get all servers (set S) having 
+# replicas of Shard id (m) → (2c) Write
+# entries in all servers (set S) in Shard id (m) → (2d) Update the valid idx of Shard id (m) in the metadata if
+# writes are successful → (2e) Release the mutex lock for Shard id (m). An example request-response pair is shown.
 # TODO: havent use mutex anywhere
 @app.route('/write', methods=['POST'])
 def write():
@@ -331,7 +346,13 @@ def write():
     data = data['data']
     cnt=0
     for entry in data:
-        shard = shardT[entry['Stud_id'] % N]        # TODO:needs to be modified, ho to do this
+        shard_id = ''
+        for shard in shards:
+            if entry['Stud_id'] >= shard['Stud_id_low'] and entry['Stud_id'] < shard['Stud_id_low'] + shard['Shard_size']:
+                tmp=shard
+                shard_id = shard['Shard_id']
+                break
+        shard=tmp
         request_id = random.randint(100000, 999999)
         server = hashmaps[shard['Shard_id']].get_server_for_request(request_id)
         container = client.containers.get(server_id_to_host[server])
@@ -345,8 +366,22 @@ def write():
         new_mp['data'] = entry
         response = requests.post(url_redirect, json=new_mp)
 
+        # print(response.json())
         if response.status_code == 200:
             cnt += response.json()['current_idx']-shard['valid_idx']
+            # for server in mapT[shard['Shard_id']]:
+            #     container = client.containers.get(server)
+            #     ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+            #     url_redirect = f'http://{ip_addr}:5000/update'
+            #     data = {
+            #         "shard":shard['Shard_id'],
+            #         "Stud_id":response.json()['current_idx'],
+            #         "data":entry
+            #     }
+            #     requests.put(url_redirect, json=data)
+            
+            # shard['valid_idx'] = response.json()['current_idx']
+
 
     response_data = {
         "message" : "{} Data entries added".format(cnt),
