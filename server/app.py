@@ -264,7 +264,7 @@ def delete():
     global columns, dtypes, column_list
     data = request.get_json()
     shard = data['shard']
-    stud_id = data['stud_id']
+    stud_id = data['Stud_id']
 
     # if shard does not exist
     # result = query(f"SHOW DATABASES LIKE '{shard}'")

@@ -32,7 +32,8 @@ def send_multiple_write_requests(data_list):
     write_time = []
     for data in data_list:
         start_time = time.time()
-        send_post_request(data, '/write')
+        write_data = {"data":[data]}
+        send_post_request(write_data, '/write')
         end_time = time.time()
         write_time.append(end_time - start_time)
     
@@ -42,6 +43,7 @@ def send_multiple_read_requests(data_list):
     read_time = []
     for data in data_list:
         payload_json = {"low": data["Stud_id"], "high": data["Stud_id"]}
+        payload_json = {"Stud_id": payload_json}
         start_time = time.time()
         response = send_post_request(payload_json, '/read')
         end_time = time.time()

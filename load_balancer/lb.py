@@ -392,7 +392,7 @@ def write():
     for entry in data:
         shard_id = ''
         for shard in shardT.keys():
-            if entry['Stud_id'] >= shardT[shard]['Stud_id_low'] and entry['Stud_id'] < shardT[shard]['Stud_id_low'] + shardT[shard]['Shard_size']:
+            if entry['Stud_id'] >= int(shardT[shard]['Stud_id_low']) and entry['Stud_id'] < int(shardT[shard]['Stud_id_low']) + int(shardT[shard]['Shard_size']):
                 if shard not in writes.keys():
                     writes[shard] = []
                     writes[shard].append(entry)
