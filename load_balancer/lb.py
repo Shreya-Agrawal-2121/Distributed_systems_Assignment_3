@@ -488,9 +488,93 @@ def delete():
     }
     return jsonify(response_data), 200
 
+# # route /<path:path>
+# @app.route('/<path:path>', methods=['GET'])
+# def redirect_request(path='home'):
+#     global heartbeat_ptr
+#     # If path is not heartbeat or home return error
+#     if not (path == 'home' or path == 'heartbeat'):
+#         response_data = {
+#             "message" : "<Error> {path} endpoint does not exist in server replicas",
+#             "status" : "failure"
+#         }
+#         return jsonify(response_data), 400
+    
+#     # If no server replicas are working return error
+#     if len(server_host_to_id) == 0:
+#         response_data = {
+#             "message" : "<Error> No server replica working",
+#             "status" : "failure"
+#         }
+#         return jsonify(response_data), 400
+    
+#     # If path is heartbeat, check if the server is working or not
+#     if path == 'heartbeat':
+#         # Get the next server to send heartbeat request to
+#         num_servers = len(server_host_to_id)
+#         heartbeat_ptr = (heartbeat_ptr + 1) % num_servers
+
+#         # Get the server id and server name
+#         server = list(server_host_to_id.keys())[heartbeat_ptr]
+#         server_id = server_host_to_id[server]
+
+#         # try Send heartbeat request to the server
+#         try:
+#             # if successful, return the response
+#             container = client.containers.get(server)
+#             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+#             url_redirect = f'http://{ip_addr}:5000/{path}'
+#             return requests.get(url_redirect).json(), 200
+#         except docker.errors.NotFound:
+#             # if server container is not found, 
+#             # run a new server container and return error
+#             client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id})
+#             print('Restarted server container ' + server + ' with id ' + str(server_id))
+#             response_data = {'message': '<Error> Failed to redirect request', 
+#                         'status': 'failure'}
+#             return jsonify(response_data), 400
+#         except Exception as e:
+#             # if server container is found but not working,
+#             #  restart the server container and return error
+#             container = client.containers.get(server)
+#             container.restart()
+#             print('Restarted server container ' + server + ' with id ' + str(server_id))
+#             response_data = {'message': '<Error> Failed to redirect request', 
+#                         'status': 'failure'}
+#             return jsonify(response_data), 400
+
+#     # 
+#     # try:
+#     #     data = request.get_json()
+#     #     if not data  or 'request_id' not in data.keys():
+#     #         request_id = random.randint(100000, 999999)
+#     #     else:
+#     #         request_id = data['request_id']
+#     # except KeyError as err:
+#     request_id = random.randint(100000, 999999) # generate a random request id
+
+#     # Using the request id select the server and replace server_id and server name with corresponding values
+#     try:
+#         # send the request to the server by finding the server_id using consistent hashing
+#         server_id = ConsistentHashing.get_server_for_request(request_id)
+#         server = server_id_to_host[server_id]
+#         container = client.containers.get(server)
+#         ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+#         url_redirect = f'http://{ip_addr}:5000/{path}'
+#         return requests.get(url_redirect).json(), 200
+#     except Exception as e:
+#             print(e)
+#             response_data = {'message': '<Error> Failed to redirect request', 
+#                         'status': 'failure'}
+#             return jsonify(response_data), 400
 
 # main function
 if __name__ == "__main__":
+     # run a new process for heartbeat.py file
+    # absolute_path = os.path.dirname(__file__)
+    # relative_path = "./heartbeat.py"
+    # full_path = os.path.join(absolute_path, relative_path)
+    # process = Popen(['python3', full_path], close_fds=True)
     
     # run the flask app
     app.run(host='0.0.0.0', port=5000)
