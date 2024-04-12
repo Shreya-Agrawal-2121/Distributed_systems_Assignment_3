@@ -8,9 +8,10 @@ from consistentHashing import ConsistentHashing
 import time
 from threading import Thread
 from threading import Lock
+import sqlite3
 # Initialize the Flask application
 app = Flask(__name__)
-
+mydb = None
 # Initialize the ConsistentHashing class
 heartbeat_ptr=0
 hashmaps = {}
@@ -23,11 +24,10 @@ image = "server"
 server_id_to_host = {}
 server_host_to_id = {}
 shardT = {}
+#TODO: update mapT to store server name along with primary server info
 mapT = {}
 N = 0
 schema = {}
-shards = []
-servers = {}
 locks = {}
 def write_to_servers(*args):
     shard = args[0]
@@ -36,19 +36,15 @@ def write_to_servers(*args):
     lock.acquire()
     valid_id = 0
     shd = None
-    for sh in shards:
-        if shard == sh['Shard_id']:
-            valid_id = sh['valid_idx']
-            shd = sh
-            break
-    for server in mapT[shard]:
+    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'", 'database.db')
+    servers = [row[0] for row in result]
+    for server in servers:
         try:
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
             url_redirect = f'http://{ip_addr}:5000/write'
             request_data = {
                 "shard": shard,
-                "curr_idx": valid_id,
                 "data": data
             }
             requests.post(url_redirect, json=request_data)
@@ -59,19 +55,36 @@ def write_to_servers(*args):
             response_data = {'message': '<Error> Failed to write to server', 
                         'status': 'failure'}
             return jsonify(response_data), 400
-    for sh in shards:
-        if shard == sh['Shard_id']:
-            sh['valid_idx'] += len(data)
-            break
     lock.release()
+
+def query(sql, database):
+    global mydb
+    try:
+            cursor = mydb.cursor()
+            cursor.execute(sql)
+    except Exception:
+            mydb = sqlite3.connect(database)
+
+            cursor = mydb.cursor()
+            cursor.execute(sql)
+    res=cursor.fetchall()
+    cursor.close()
+    mydb.commit()
+    return res
+
+
 @app.route('/init', methods=['POST'])
 def init_server():
-    global N, schema, shards, servers
+    global N, schema, mydb
     data = request.get_json()
     N = data['N']
     schema = data['schema']
     shards = data['shards']
     servers = data['servers']
+    mydb = sqlite3.connect('database.db')
+    query(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)", 'database.db')
+    query(f"CREATE TABLE IF NOT EXISTS MapT (id INT AUTO_INCREMENT PRIMARY KEY, Shard_id VARCHAR(512), Server_id VARCHAR(512), Primary_server INT)", 'database.db')
+
     keys = list(servers.keys())
     i = 0
     while i < N:
@@ -84,6 +97,8 @@ def init_server():
             continue
         if i >= len(keys):
             server = server + str(server_id)
+            if server in server_host_to_id.keys():
+                continue
             keys.append(server)
         try:
                 client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server,
@@ -98,10 +113,8 @@ def init_server():
         
         shards_data = servers[server]
         for shard in shards_data:
-            if shard not in mapT:
-                mapT[shard] = [server]
-            else:
-                mapT[shard].append(server)
+            query(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)", 'database.db')
+
         i += 1
         time.sleep(1)
     for server in keys:
@@ -113,7 +126,6 @@ def init_server():
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
             print(ip_addr)
-            print(post_data)
             headers = {'content-type' : 'application/json'}
             url_redirect = f'http://{ip_addr}:5000/config'
             requests.post(url_redirect, json=post_data, headers=headers)
@@ -125,20 +137,20 @@ def init_server():
             return jsonify(response_data), 400
         time.sleep(1)
     for shard in shards:
+        values = list(shard.values())
         shard_id = shard['Shard_id']
-        low_id = shard['Stud_id_low']
-        shard['valid_idx'] = low_id
-        if shard_id in shardT:
-            continue
-        shardT[shard_id] = shard
-    for shard in mapT.keys():
+        query(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}", 'database.db')
         cmap = ConsistentHashing(3, 512, 9)
         mutex_lock = Lock()
-        locks[shard] = mutex_lock
-        for server in mapT[shard]:
-            server_id = server_host_to_id[server]
+        locks[shard_id] = mutex_lock
+        result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard_id}'", 'database.db')
+        print(result)
+        if len(result) == 0:
+            continue
+        for row in result:
+            server_id = server_host_to_id[row[0]]
             cmap.add_server(server_id)
-        hashmaps[shard] = cmap
+        hashmaps[shard_id] = cmap
     response_data = {
         'message' : "Configured database",
         'status' : "successful" 
@@ -147,6 +159,22 @@ def init_server():
 
 @app.route('/status', methods=['GET'])
 def status():
+    shards = []
+    result = query("SELECT * FROM ShardT", 'database.db')
+    for row in result:
+        shard = {
+            "Stud_id_low": row[0],
+            "Shard_id": row[1],
+            "Shard_size": row[2]
+        }
+        shards.append(shard)
+    result = query("SELECT Shard_id, Server_id FROM MapT", 'database.db')
+    servers = {}
+    for row in result:
+        if row[1] not in servers:
+            servers[row[1]] = [row[0]]
+        else:
+            servers[row[1]].append(row[0])
     response = {
         "N": N,
         "schema": schema,
@@ -159,7 +187,7 @@ def status():
 # route /add
 @app.route('/add', methods=['POST'])
 def add_servers():
-    global N, shards, shardT, servers, mapT, schema
+    global N, shardT, mapT, schema
     data = request.get_json()
     n = data['n']
     new_shards = data['new_shards']
@@ -202,28 +230,23 @@ def add_servers():
                         'status': 'failure'}
             
             return jsonify(response_data), 400
-        servers[server] = servers_new[server]
         shard_data = servers_new[server]
         for shard in shard_data:
-            if shard not in mapT:
-                mapT[shard] = [server]
-            else:
-                mapT[shard].append(server)
+            query(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)", 'database.db')
         time.sleep(1)
         N += 1
         i += 1
     for new_shard in new_shards:
-        shard_id = new_shard['Shard_id']
-        low_id = new_shard['Stud_id_low']
-        new_shard['valid_idx'] = low_id
-        if shard_id in shardT:
-            continue
-        shardT[shard_id] = new_shard
-        shards.append(new_shard)
-    for shard in mapT.keys():
-        num = len(mapT[shard])
+        values = list(new_shard.values())
+        query(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}", 'database.db')
+    result = query("SELECT Shard_id FROM ShardT", 'database.db')
+    shards = [row[0] for row in result]
+    for shard in shards:
+        result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'", 'database.db')
+        servers = [row[0] for row in result]
+        num = len(servers)
         cmap = ConsistentHashing(num, 512, 9)
-        for server in mapT[shard]:
+        for server in servers:
             mutex_lock = Lock()
             locks[shard] = mutex_lock
             server_id = server_host_to_id[server]
@@ -303,12 +326,13 @@ def remove_servers():
             # if successfully removed, remove server from server_id_to_host and server_host_to_id
             server_host_to_id.pop(server)
             server_id_to_host.pop(server_id)
-            for shard in servers[server]:
-                mapT[shard].remove(server)
+            result = query(f"SELECT Shard_id FROM MapT WHERE Server_id = '{server}'", 'database.db')
+            shards = [row[0] for row in result]
+            for shard in shards:
+                
                 hashmaps[shard].remove_server(server_id)
-            servers.pop(server)
+            query(f"DELETE FROM MapT WHERE Server_id = '{server}'", 'database.db')            
             time.sleep(1)
-
         except Exception as e:
             print(e)
             response_data = {'message': '<Error> Failed to remove docker container', 
@@ -336,10 +360,19 @@ def read():
     high = stud_id['high']
     shards_range = {}
     result = []
+    result = query("SELECT * FROM ShardT", 'database.db')
+    shards = [
+        {
+            "Stud_id_low": row[0],
+            "Shard_id": row[1],
+            "Shard_size": row[2]
+        } for row in result
+    ]
     for shard in shards:
         range_val = (shard['Stud_id_low'], shard['Stud_id_low'] + shard['Shard_size'])
         if max((range_val[0], low)) <= min((range_val[1], high)):
             shards_range[shard['Shard_id']] = (max((range_val[0], low)), min((range_val[1], high)))
+    result = []
     for shard in shards_range.keys():
         request_id = random.randint(100000, 999999)
         range_val = shards_range[shard]
@@ -389,15 +422,24 @@ def write():
     data = data['data']
     cnt=0
     writes = {}
+    result = query("SELECT * FROM ShardT", 'database.db')
+    shards = [
+        {
+            "Stud_id_low": row[0],
+            "Shard_id": row[1],
+            "Shard_size": row[2]
+        } for row in result
+    ]
     for entry in data:
         shard_id = ''
-        for shard in shardT.keys():
-            if entry['Stud_id'] >= int(shardT[shard]['Stud_id_low']) and entry['Stud_id'] < int(shardT[shard]['Stud_id_low']) + int(shardT[shard]['Shard_size']):
-                if shard not in writes.keys():
-                    writes[shard] = []
-                    writes[shard].append(entry)
+        for shard in shards:
+            shard_id = shard['Shard_id']
+            if entry['Stud_id'] >= int(shard['Stud_id_low']) and entry['Stud_id'] < int(shard['Stud_id_low']) + int(shard['Shard_size']):
+                if shard_id not in writes.keys():
+                    writes[shard_id] = []
+                    writes[shard_id].append(entry)
                 else:
-                    writes[shard].append(entry)
+                    writes[shard_id].append(entry)
                 break
         cnt += 1
     for shard in writes.keys():
@@ -416,19 +458,30 @@ def write():
 def update():
     data = request.get_json()
     Stud_id = data['Stud_id']
-    shard = ''
+    req_shard = ''
     new_data = data['data']
-    for shard_id in shardT.keys():
-        if Stud_id >= shardT[shard_id]['Stud_id_low'] and Stud_id < shardT[shard_id]['Stud_id_low'] + shardT[shard_id]['Shard_size']:
-            shard = shard_id
+    result = query("SELECT * FROM ShardT", 'database.db')
+    shards = [
+        {
+            "Stud_id_low": row[0],
+            "Shard_id": row[1],
+            "Shard_size": row[2]
+        } for row in result
+    ]
+    for shard in shards:
+        shard_id = shard['Shard_id']
+        if Stud_id >= shard['Stud_id_low'] and Stud_id < shard['Stud_id_low'] + shard['Shard_size']:
+            req_shard = shard_id
             break
-    if shard_id == '':
+    if req_shard == '':
         response_data = {
             "message" : "Data entry does not exist",
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    for server in mapT[shard]:
+    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'", 'database.db')
+    servers = [row[0] for row in result]
+    for server in servers:
         try:
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
@@ -455,18 +508,29 @@ def update():
 def delete():
     data = request.get_json()
     Stud_id = data['Stud_id']
-    shard = ''
-    for shard_id in shardT.keys():
-        if Stud_id >= shardT[shard_id]['Stud_id_low'] and Stud_id < shardT[shard_id]['Stud_id_low'] + shardT[shard_id]['Shard_size']:
-            shard = shard_id
+    req_shard = ''
+    result = query("SELECT * FROM ShardT", 'database.db')
+    shards = [
+        {
+            "Stud_id_low": row[0],
+            "Shard_id": row[1],
+            "Shard_size": row[2]
+        } for row in result
+    ]
+    for shard in shards:
+        shard_id = shard['Shard_id']
+        if Stud_id >= shard['Stud_id_low'] and Stud_id < shard['Stud_id_low'] + shard['Shard_size']:
+            req_shard = shard_id
             break
-    if shard_id == '':
+    if req_shard == '':
         response_data = {
             "message" : "Data entry does not exist",
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    for server in mapT[shard]:
+    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'", 'database.db')
+    servers = [row[0] for row in result]
+    for server in servers:
         try:
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]

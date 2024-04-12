@@ -168,23 +168,11 @@ def write():
     global columns, dtypes, column_list
     data = request.get_json()
     shard = data['shard']
-    curr_idx = data['curr_idx']
     stud_data = data['data']
     shard_db = f"{shard}.db"
     
     query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
-
-    # check if size == curr_idx
-    result = query(f"SELECT COUNT(*) FROM StudT", shard_db)
-    if result[0][0] != curr_idx:
-        response_data = {
-            "message": "Size does not match",
-            "status": "failed"
-        }
-        return jsonify(response_data), 500
-
     cnt = 0
-
     for row in stud_data:
         # check if student id exists
         values = list(row.values())
@@ -196,13 +184,11 @@ def write():
     mydb.close()
     response_data = {
         "message": "Data entries added",
-        "current_idx": curr_idx + cnt,
         "status": "success"
     }
     if cnt==0:
         response_data = {
             "message": "All Data entries already exists",
-            "current_idx": curr_idx,
             "status": "failed"
         }
         return jsonify(response_data), 500
