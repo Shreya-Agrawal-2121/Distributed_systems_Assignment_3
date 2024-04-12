@@ -481,13 +481,14 @@ def update():
         return jsonify(response_data), 400
     result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'", 'database.db')
     servers = [row[0] for row in result]
+    print(servers)
     for server in servers:
         try:
             container = client.containers.get(server)
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
             url_redirect = f'http://{ip_addr}:5000/update'
             data = {
-                "shard":shard,
+                "shard":req_shard,
                 "Stud_id":Stud_id,
                 "data":new_data
             }
@@ -536,7 +537,7 @@ def delete():
             ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
             url_redirect = f'http://{ip_addr}:5000/del'
             data = {
-                "shard":shard,
+                "shard":req_shard,
                 "Stud_id":Stud_id
             }
             requests.delete(url_redirect, json=data)
