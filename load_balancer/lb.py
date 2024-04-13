@@ -44,7 +44,8 @@ def write_to_servers(*args):
     lock.acquire()
     valid_id = 0
     shd = None
-    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'", 'database.db')
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'")
+    result = cursor.fetchall()
     servers = [row[0] for row in result]
     for server in servers:
         try:
@@ -89,13 +90,9 @@ def init_server():
     schema = data['schema']
     shards = data['shards']
     servers = data['servers']
-    mydb = sqlite3.connect('database.db')
-    cursor = cnx.cursor()
     cursor.execute(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)")
-    result = cursor.fetchall()
-    print(result)
-    query(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)", 'database.db')
-    query(f"CREATE TABLE IF NOT EXISTS MapT (id INT AUTO_INCREMENT PRIMARY KEY, Shard_id VARCHAR(512), Server_id VARCHAR(512), Primary_server INT)", 'database.db')
+    cursor.execute(f"CREATE TABLE IF NOT EXISTS MapT (id INT AUTO_INCREMENT PRIMARY KEY, Shard_id VARCHAR(512), Server_id VARCHAR(512), Primary_server INT)")
+    
 
     keys = list(servers.keys())
     i = 0
@@ -125,7 +122,7 @@ def init_server():
         
         shards_data = servers[server]
         for shard in shards_data:
-            query(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)", 'database.db')
+            cursor.execute(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)")
 
         i += 1
         time.sleep(1)
@@ -151,11 +148,12 @@ def init_server():
     for shard in shards:
         values = list(shard.values())
         shard_id = shard['Shard_id']
-        query(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}", 'database.db')
+        cursor.execute(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}")
         cmap = ConsistentHashing(3, 512, 9)
         mutex_lock = Lock()
         locks[shard_id] = mutex_lock
-        result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard_id}'", 'database.db')
+        cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard_id}'")
+        result = cursor.fetchall()
         print(result)
         if len(result) == 0:
             continue
@@ -172,7 +170,8 @@ def init_server():
 @app.route('/status', methods=['GET'])
 def status():
     shards = []
-    result = query("SELECT * FROM ShardT", 'database.db')
+    cursor.execute("SELECT * FROM ShardT")
+    result = cursor.fetchall()
     for row in result:
         shard = {
             "Stud_id_low": row[0],
@@ -180,7 +179,8 @@ def status():
             "Shard_size": row[2]
         }
         shards.append(shard)
-    result = query("SELECT Shard_id, Server_id FROM MapT", 'database.db')
+    cursor.execute("SELECT Shard_id, Server_id FROM MapT")
+    result = cursor.fetchall()
     servers = {}
     for row in result:
         if row[1] not in servers:
@@ -244,17 +244,19 @@ def add_servers():
             return jsonify(response_data), 400
         shard_data = servers_new[server]
         for shard in shard_data:
-            query(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)", 'database.db')
+            cursor.execute(f"INSERT INTO MapT (Shard_id, Server_id, Primary_server) VALUES ('{shard}', '{server}', 0)")
         time.sleep(1)
         N += 1
         i += 1
     for new_shard in new_shards:
         values = list(new_shard.values())
-        query(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}", 'database.db')
-    result = query("SELECT Shard_id FROM ShardT", 'database.db')
+        cursor.execute(f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size) VALUES {tuple(values)}")
+    cursor.execute("SELECT Shard_id FROM ShardT")
+    result = cursor.fetchall()
     shards = [row[0] for row in result]
     for shard in shards:
-        result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'", 'database.db')
+        cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'")
+        result = cursor.fetchall()
         servers = [row[0] for row in result]
         num = len(servers)
         cmap = ConsistentHashing(num, 512, 9)
@@ -331,11 +333,11 @@ def remove_servers():
         server_id = server_host_to_id[server]
 
         # check if server is primary server for any shard by sending request to shard manager
-        response = requests.get('http://localhost:5000/find_primary', json={'server_id': server_id})
-        response_data = response.json()
-        if response_data['status'] == 'failure':
-            return jsonify(response_data), 400
-        primary_shards = response_data['data']
+        # response = requests.get('http://localhost:5000/find_primary', json={'server_id': server_id})
+        # response_data = response.json()
+        # if response_data['status'] == 'failure':
+        #     return jsonify(response_data), 400
+        # primary_shards = response_data['data']
 
 
         # try to stop and remove server container
@@ -346,19 +348,20 @@ def remove_servers():
             # if successfully removed, remove server from server_id_to_host and server_host_to_id
             server_host_to_id.pop(server)
             server_id_to_host.pop(server_id)
-            result = query(f"SELECT Shard_id FROM MapT WHERE Server_id = '{server}'", 'database.db')
+            cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{server}'")
+            result = cursor.execute()
             shards = [row[0] for row in result]
             for shard in shards:
                 
                 hashmaps[shard].remove_server(server_id)
-            query(f"DELETE FROM MapT WHERE Server_id = '{server}'", 'database.db')            
+            cursor.execute(f"DELETE FROM MapT WHERE Server_id = '{server}'")            
 
-            # send request to shard manager to update primary server for shards
-            for shard in primary_shards:
-                response = requests.post('http://localhost:5000/update_primary', json={'shard_id': shard})
-                response_data = response.json()
-                if response_data['status'] == 'failure':
-                    return jsonify(response_data), 400
+            # # send request to shard manager to update primary server for shards
+            # for shard in primary_shards:
+            #     response = requests.post('http://localhost:5000/update_primary', json={'shard_id': shard})
+            #     response_data = response.json()
+            #     if response_data['status'] == 'failure':
+            #         return jsonify(response_data), 400
             
 
 
@@ -390,7 +393,8 @@ def read():
     high = stud_id['high']
     shards_range = {}
     result = []
-    result = query("SELECT * FROM ShardT", 'database.db')
+    cursor.execute("SELECT * FROM ShardT")
+    result = cursor.fetchall()
     shards = [
         {
             "Stud_id_low": row[0],
@@ -456,7 +460,8 @@ def write():
     #TODO : only need to write to primary server
 
 
-    result = query("SELECT * FROM ShardT", 'database.db')
+    cursor.execute("SELECT * FROM ShardT")
+    result = cursor.fetchall()
     shards = [
         {
             "Stud_id_low": row[0],
@@ -494,7 +499,8 @@ def update():
     Stud_id = data['Stud_id']
     req_shard = ''
     new_data = data['data']
-    result = query("SELECT * FROM ShardT", 'database.db')
+    cursor.execute("SELECT * FROM ShardT")
+    result = cursor.fetchall()
 
 
     #TODO : only need to update to primary server
@@ -518,7 +524,8 @@ def update():
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'", 'database.db')
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'")
+    result = cursor.fetchall()
     servers = [row[0] for row in result]
     print(servers)
     for server in servers:
@@ -549,8 +556,8 @@ def delete():
     data = request.get_json()
     Stud_id = data['Stud_id']
     req_shard = ''
-    result = query("SELECT * FROM ShardT", 'database.db')
-
+    cursor.execute("SELECT * FROM ShardT")
+    result = cursor.fetchall()
 
     #TODO : only need to del to primary server
 
@@ -573,7 +580,8 @@ def delete():
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    result = query(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'", 'database.db')
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'")
+    result = cursor.fetchall()
     servers = [row[0] for row in result]
     for server in servers:
         try:

@@ -1,5 +1,6 @@
 build:
 	sudo docker-compose build
+	sudo docker-compose up -d mysql
 run_mysql:
 	sudo docker-compose up -d mysql
 run_lb:
