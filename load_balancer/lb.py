@@ -3,12 +3,15 @@ import docker
 import os
 import random
 import requests
-from subprocess import Popen
+import subprocess
 from consistentHashing import ConsistentHashing
 import time
 from threading import Thread
 from threading import Lock
 import sqlite3
+import mysql.connector
+import socket
+
 # Initialize the Flask application
 app = Flask(__name__)
 mydb = None
@@ -19,7 +22,12 @@ hashmaps = {}
 client = docker.from_env()
 network = "n1"
 image = "server"
-
+mysql_container = client.containers.get("mysql")
+mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+cnx = mysql.connector.connect(user='test', password='test',
+                              host=mysql_ip,
+                              database='test')
+cursor = cnx.cursor()
 # Initialize the server_id to hostname and hostname to server_id mapping
 server_id_to_host = {}
 server_host_to_id = {}
@@ -82,6 +90,10 @@ def init_server():
     shards = data['shards']
     servers = data['servers']
     mydb = sqlite3.connect('database.db')
+    cursor = cnx.cursor()
+    cursor.execute(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)")
+    result = cursor.fetchall()
+    print(result)
     query(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)", 'database.db')
     query(f"CREATE TABLE IF NOT EXISTS MapT (id INT AUTO_INCREMENT PRIMARY KEY, Shard_id VARCHAR(512), Server_id VARCHAR(512), Primary_server INT)", 'database.db')
 

@@ -4,12 +4,27 @@ networks:
     n1:
         name: n1
 
-services:    
+services:
+    mysql:
+        image: mysql:5.7
+        container_name: mysql
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: test
+            MYSQL_USER: test
+            MYSQL_PASSWORD: test
+        ports:
+            - "3306:3306"
+        networks:
+            n1: {}  
+
     serv:        
         build: ./server
         image: server
         environment:
             - PYTHONUNBUFFERED=1
+        depends_on:
+            - mysql
     
     lb:
         build: ./load_balancer
@@ -25,5 +40,7 @@ services:
         volumes:
             - /var/run/docker.sock:/var/run/docker.sock
         privileged: true
+        depends_on:
+            - mysql
         networks:
             n1: {}

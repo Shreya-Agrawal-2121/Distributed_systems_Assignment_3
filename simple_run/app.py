@@ -1,6 +1,10 @@
 from flask import Flask, jsonify
 import os
+import mysql.connector
 
+cnx = mysql.connector.connect(user='root', password='shr',
+                              host='127.0.0.1',
+                              database='meta_data')
 app = Flask(__name__)
 
 # Get server ID from environment variable
