@@ -22,12 +22,13 @@ hashmaps = {}
 client = docker.from_env()
 network = "n1"
 image = "server"
-mysql_container = client.containers.get("mysql")
+mysql_container = client.containers.get("mysql_db")
 mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
-cnx = mysql.connector.connect(user='test', password='test',
-                              host=mysql_ip,
-                              database='test')
+cnx = mysql.connector.connect(user='root', password='test',
+                              host=mysql_ip)
 cursor = cnx.cursor()
+cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
+cursor.execute("USE meta_data")
 # Initialize the server_id to hostname and hostname to server_id mapping
 server_id_to_host = {}
 server_host_to_id = {}

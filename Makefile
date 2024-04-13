@@ -1,6 +1,6 @@
 build:
 	sudo docker-compose build
-	sudo docker-compose up -d mysql
+	sudo docker run --name mysql_db --hostname mysql_db --network n1 -e MYSQL_ROOT_PASSWORD=test -d mysql:latest
 run_mysql:
 	sudo docker-compose up -d mysql
 run_lb:
