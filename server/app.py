@@ -7,6 +7,7 @@ app = Flask(__name__)
 # Get server ID from environment variable
 server_id = os.environ.get('SERVER_ID')
 server_name = os.environ.get('SERVER_NAME')
+is_primary_server = 0
 db = []
 column_list = ""
 columns = []
@@ -165,21 +166,46 @@ def read():
 
 @app.route('/write', methods=['POST'])
 def write():
-    global columns, dtypes, column_list
+    global columns, dtypes, column_list, is_primary_server
     data = request.get_json()
     shard = data['shard']
     stud_data = data['data']
     shard_db = f"{shard}.db"
+
+    if is_primary_server == 1:
+        # send request with shard_id to shard manager for secondary server list
+        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
+        secondary_servers = response.json()
+        maj_cnt=0
+        for server in secondary_servers:
+            # send data to secondary servers
+            requests.post(f"http://{server}/write", json=data)
+            # check if successful
+            if response.status_code == 200:
+                maj_cnt += 1
+        if maj_cnt < len(secondary_servers)/2:
+            # how to remove the successful writes #TODO
+            response_data = {
+                "message": "Write failed",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
     
     query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
     cnt = 0
-    for row in stud_data:
-        # check if student id exists
-        values = list(row.values())
-        result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
-        if len(result) == 0:
-            query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
-            cnt += 1
+    # open the log and make changes to be made in the log_file serve_id.log
+    with open(f"{server_id}.log", "a") as log_file:
+        for row in stud_data:
+            # check if student id exists
+            values = list(row.values())
+            result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
+            if len(result) == 0:
+                # also mention shard_id in the log file
+                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
+                query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
+                cnt += 1
+        log_file.close()
+
     query(f"DETACH DATABASE '{shard}'", shard_db)
     mydb.close()
     response_data = {
@@ -197,7 +223,7 @@ def write():
 
 @app.route('/update', methods=['PUT'])
 def update():
-    global columns, dtypes, column_list
+    global columns, dtypes, column_list, is_primary_server
 
     data = request.get_json()
     shard = data['shard']
@@ -212,6 +238,7 @@ def update():
         }
         return jsonify(response_data), 500
 
+
     # if shard does not exist
     # result = query(f"SHOW DATABASES LIKE '{shard}'")
     # if len(result) == 0:
@@ -223,19 +250,46 @@ def update():
 
     shard_db = f"{shard}.db"
     
+
+    if is_primary_server == 1:
+        # send request with shard_id to shard manager for secondary server list
+        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
+        secondary_servers = response.json()
+        maj_cnt=0
+        for server in secondary_servers:
+            # send data to secondary servers
+            requests.put(f"http://{server}/update", json=data)
+            # check if successful
+            if response.status_code == 200:
+                maj_cnt += 1
+        if maj_cnt < len(secondary_servers)/2:
+            # how to remove the successful writes #TODO
+            response_data = {
+                "message": "Update failed",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+
     query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
-    result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {stud_id}", shard_db)
-    if len(result) == 0:
-        response_data = {
-            "message": "Student id does not exist",
-            "status": "failed"
-        }
-        return jsonify(response_data), 500
-    updated_data = ""
-    for key, value in data.items():
-        updated_data += f"{key} = '{value}', "
-    updated_data = updated_data[:-2]
-    query(f"UPDATE StudT SET {updated_data} WHERE Stud_id = {stud_id}", shard_db)
+
+    # open the log and make changes to be made in the log_file serve_id.log
+    with open(f"{server_id}.log", "a") as log_file:
+        
+        result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {stud_id}", shard_db)
+        if len(result) == 0:
+            response_data = {
+                "message": "Student id does not exist",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+        updated_data = ""
+        for key, value in data.items():
+            updated_data += f"{key} = '{value}', "
+        updated_data = updated_data[:-2]
+        log_file.write(f"{shard}: UPDATE StudT SET {data} WHERE Stud_id = {stud_id}\n")
+        query(f"UPDATE StudT SET {updated_data} WHERE Stud_id = {stud_id}", shard_db)    
+        log_file.close()
+
     query(f"DETACH DATABASE '{shard}'", shard_db)
     mydb.close()
     response_data = {
@@ -247,7 +301,7 @@ def update():
 
 @app.route('/del', methods=['DELETE'])
 def delete():
-    global columns, dtypes, column_list
+    global columns, dtypes, column_list, is_primary_server
     data = request.get_json()
     shard = data['shard']
     stud_id = data['Stud_id']
@@ -263,16 +317,43 @@ def delete():
 
     shard_db = f"{shard}.db"
     
+    if is_primary_server == 1:
+        # send request with shard_id to shard manager for secondary server list
+        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
+        secondary_servers = response.json()
+        maj_cnt=0
+        for server in secondary_servers:
+            # send data to secondary servers
+            requests.delete(f"http://{server}/del", json=data)
+            # check if successful
+            if response.status_code == 200:
+                maj_cnt += 1
+        if maj_cnt < len(secondary_servers)/2:
+            # how to remove the successful writes #TODO
+            response_data = {
+                "message": "Delete failed",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+        
+
+
     query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
-    result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {stud_id}", shard_db)
-    if len(result) == 0:
-        response_data = {
-            "message": "Student id does not exist",
-            "status": "failed"
-        }
-        return jsonify(response_data), 500
     
-    query(f"DELETE FROM StudT WHERE Stud_id = {stud_id}", shard_db)
+    # open the log and make changes to be made in the log_file serve_id.log
+    with open(f"{server_id}.log", "a") as log_file:
+        
+    
+        result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {stud_id}", shard_db)
+        if len(result) == 0:
+            response_data = {
+                "message": "Student id does not exist",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+        log_file.write(f"{shard}: DELETE FROM StudT WHERE Stud_id = {stud_id}\n")
+        query(f"DELETE FROM StudT WHERE Stud_id = {stud_id}", shard_db)
+        
     query(f"DETACH DATABASE '{shard}'", shard_db)
     mydb.close()
     response_data = {
