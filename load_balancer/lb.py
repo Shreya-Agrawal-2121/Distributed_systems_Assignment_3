@@ -29,6 +29,7 @@ cnx = mysql.connector.connect(user='root', password='test',
 cursor = cnx.cursor()
 cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
 cursor.execute("USE meta_data")
+cnx.commit()
 # Initialize the server_id to hostname and hostname to server_id mapping
 server_id_to_host = {}
 server_host_to_id = {}
@@ -47,6 +48,7 @@ def write_to_servers(*args):
     shd = None
     cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'")
     result = cursor.fetchall()
+    cnx.commit()
     servers = [row[0] for row in result]
     for server in servers:
         try:
@@ -67,22 +69,6 @@ def write_to_servers(*args):
             return jsonify(response_data), 400
     lock.release()
 
-def query(sql, database):
-    global mydb
-    try:
-            cursor = mydb.cursor()
-            cursor.execute(sql)
-    except Exception:
-            mydb = sqlite3.connect(database)
-
-            cursor = mydb.cursor()
-            cursor.execute(sql)
-    res=cursor.fetchall()
-    cursor.close()
-    mydb.commit()
-    return res
-
-
 @app.route('/init', methods=['POST'])
 def init_server():
     global N, schema, mydb
@@ -94,7 +80,7 @@ def init_server():
     cursor.execute(f"CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low INT PRIMARY KEY, Shard_id VARCHAR(512), Shard_size INT)")
     cursor.execute(f"CREATE TABLE IF NOT EXISTS MapT (id INT AUTO_INCREMENT PRIMARY KEY, Shard_id VARCHAR(512), Server_id VARCHAR(512), Primary_server INT)")
     
-
+    cnx.commit()
     keys = list(servers.keys())
     i = 0
     while i < N:
@@ -127,6 +113,7 @@ def init_server():
 
         i += 1
         time.sleep(1)
+    cnx.commit()
     for server in keys:
         post_data = {
             "schema": schema,
@@ -166,6 +153,7 @@ def init_server():
         'message' : "Configured database",
         'status' : "successful" 
     }
+    cnx.commit()
     return jsonify(response_data), 200
 
 @app.route('/status', methods=['GET'])
@@ -194,7 +182,7 @@ def status():
         "shards": shards,
         "servers": servers
     }
-    
+    cnx.commit()
     return jsonify(response), 200
 
 # route /add
@@ -276,6 +264,7 @@ def add_servers():
         "message": message,
         "status": "successful"
     }
+    cnx.commit()
     return jsonify(response), 200
 
 

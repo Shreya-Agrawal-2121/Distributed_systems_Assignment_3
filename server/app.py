@@ -1,7 +1,18 @@
 from flask import Flask, jsonify, request, redirect
 import os
-
+import docker
+import requests
 import sqlite3
+import mysql.connector
+client = docker.from_env()
+network = "n1"
+image = "server"
+mysql_container = client.containers.get("mysql_db")
+mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+cnx = mysql.connector.connect(user='root', password='test',
+                              host=mysql_ip,
+                              database='meta_data')
+cursor = cnx.cursor()
 app = Flask(__name__)
 
 # Get server ID from environment variable
@@ -12,7 +23,6 @@ db = []
 column_list = ""
 columns = []
 dtypes = []
-print(server_id, server_name)
 # Home endpoint
 def query(sql, database):
     global mydb
@@ -171,7 +181,7 @@ def write():
     shard = data['shard']
     stud_data = data['data']
     shard_db = f"{shard}.db"
-
+    
     if is_primary_server == 1:
         # send request with shard_id to shard manager for secondary server list
         response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
