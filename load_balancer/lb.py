@@ -318,6 +318,14 @@ def remove_servers():
         # remove server from server_id_to_host and server_host_to_id
         server_id = server_host_to_id[server]
 
+        # check if server is primary server for any shard by sending request to shard manager
+        response = requests.get('http://localhost:5000/find_primary', json={'server_id': server_id})
+        response_data = response.json()
+        if response_data['status'] == 'failure':
+            return jsonify(response_data), 400
+        primary_shards = response_data['data']
+
+
         # try to stop and remove server container
         try:
             container = client.containers.get(server)
@@ -332,6 +340,16 @@ def remove_servers():
                 
                 hashmaps[shard].remove_server(server_id)
             query(f"DELETE FROM MapT WHERE Server_id = '{server}'", 'database.db')            
+
+            # send request to shard manager to update primary server for shards
+            for shard in primary_shards:
+                response = requests.post('http://localhost:5000/update_primary', json={'shard_id': shard})
+                response_data = response.json()
+                if response_data['status'] == 'failure':
+                    return jsonify(response_data), 400
+            
+
+
             time.sleep(1)
         except Exception as e:
             print(e)
@@ -422,6 +440,10 @@ def write():
     data = data['data']
     cnt=0
     writes = {}
+
+    #TODO : only need to write to primary server
+
+
     result = query("SELECT * FROM ShardT", 'database.db')
     shards = [
         {
@@ -461,6 +483,11 @@ def update():
     req_shard = ''
     new_data = data['data']
     result = query("SELECT * FROM ShardT", 'database.db')
+
+
+    #TODO : only need to update to primary server
+
+    
     shards = [
         {
             "Stud_id_low": row[0],
@@ -511,6 +538,11 @@ def delete():
     Stud_id = data['Stud_id']
     req_shard = ''
     result = query("SELECT * FROM ShardT", 'database.db')
+
+
+    #TODO : only need to del to primary server
+
+    
     shards = [
         {
             "Stud_id_low": row[0],
