@@ -1,15 +1,10 @@
-from flask import Flask, jsonify, request, redirect
+from flask import Flask, jsonify, request
 import docker
-import os
 import random
 import requests
-import subprocess
 import time
 from threading import Thread
-from threading import Lock
-import sqlite3
 import mysql.connector
-import socket
 
 app = Flask(__name__)
 client = docker.from_env()
@@ -26,12 +21,20 @@ def send_heartbeats(*args):
     name = args[0]
     server_id = args[1]
     while True:
+        cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{name}'")
+        result = cursor.fetchall()
+        if len(result) == 0:
+            break
         time.sleep(0.5)
         server = client.containers.get(name)
         ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
         try:
             requests.get(f"http://{ip_addr}:5000/heartbeat")
         except docker.errors.NotFound:
+            cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{name}'")
+            result = cursor.fetchall()
+            if len(result) == 0:
+                break
             client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id})
             server = client.containers.get(name)
             ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
@@ -67,6 +70,10 @@ def send_heartbeats(*args):
                         time.sleep(0.25)  
                     
         except Exception as e:
+            cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{name}'")
+            result = cursor.fetchall()
+            if len(result) == 0:
+                break
             #TODO: update server contents
             container = client.containers.get(server)
             container.restart()
@@ -96,14 +103,17 @@ def add_server():
     thread.start()
     return jsonify({"status": "successful", "message": "Server added"}), 200
 
-@app.route('/remove_server', methods=['POST'])
-def rm_server():
-    pass
 
 @app.route('secondary', methods=['GET'])
 def get_secondary_servers():
-    pass
-
+    shard = request.args.get("shard")
+    try:
+        cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}' AND Primary_server = 0")
+        result = cursor.fetchall()
+        servers = [row[0] for row in result]
+        return jsonify({"status": "successful", "message": "Secondary servers retrieved", "servers": servers}), 200
+    except Exception as e:
+        return jsonify({"status": "failed", "message": "Error retrieving secondary servers"}), 400
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
