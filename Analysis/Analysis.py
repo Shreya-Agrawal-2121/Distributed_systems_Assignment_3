@@ -1,5 +1,13 @@
 import random
 import string
+import requests
+import time
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+def get_random_string(length):
+    return ''.join(random.choices(string.ascii_letters, k=length))
 
 class PayloadGenerator:
     def __init__(self, limit):
@@ -31,7 +39,7 @@ class PayloadGenerator:
             Stud_id = random.choice(tuple(self.available_ids))
             self.available_ids.remove(Stud_id)
             self.allocated_ids.add(Stud_id)
-            Stud_name = ''.join(random.choices(string.ascii_letters, k=random.randint(5, 20)))
+            Stud_name = get_random_string(random.randint(5, 20))
             Stud_marks = random.randint(0, 90) + 10
             data.append(
                 {'Stud_id': Stud_id, 'Stud_name': Stud_name, 'Stud_marks': Stud_marks})
@@ -41,8 +49,7 @@ class PayloadGenerator:
         if len(self.allocated_ids) == 0:
             raise ValueError("No allocated student IDs.")
         Stud_id = random.choice(tuple(self.allocated_ids))
-        Stud_name = ''.join(random.choices(
-            string.ascii_letters, k=random.randint(5, 20)))
+        Stud_name = get_random_string(random.randint(5, 20))
         Stud_marks = random.randint(0, 100)
         return {'Stud_id': Stud_id, 'data': {'Stud_id': Stud_id, 'Stud_name': Stud_name, 'Stud_marks': Stud_marks}}
 
@@ -53,6 +60,10 @@ class PayloadGenerator:
         self.allocated_ids.remove(Stud_id)
         self.available_ids.add(Stud_id)
         return {'Stud_id': Stud_id}
+
+base_url = "http://localhost:5000"
+generator = PayloadGenerator(12288)
+
 
 def plot_line_chart(x_values, y_values, x_label, y_label, title, path):
     """
