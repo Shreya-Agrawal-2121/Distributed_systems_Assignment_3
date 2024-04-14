@@ -53,3 +53,58 @@ class PayloadGenerator:
         self.allocated_ids.remove(Stud_id)
         self.available_ids.add(Stud_id)
         return {'Stud_id': Stud_id}
+
+def plot_line_chart(x_values, y_values, x_label, y_label, title, path):
+    """
+    Generate and save a line chart.
+
+    Parameters:
+        x_values (list or None): X-axis values. If None, indexes of y_values are used.
+        y_values (list): Y-axis values.
+        x_label (str): Label for the X-axis.
+        y_label (str): Label for the Y-axis.
+        title (str): Title of the plot.
+        path (str): Path where the plot will be saved.
+    """
+    plt.close()  # Close any existing plots to start fresh
+
+    # Plot the data
+    if x_values is None:
+        plt.plot(y_values)
+    else:
+        plt.plot(x_values, y_values)
+
+    # Add labels and title
+    plt.title(title)
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+
+    # Save the plot
+    plt.savefig(path)
+    print(f"Saved plot '{title}' to '{path}'")
+
+def launch_read_requests():
+    read_time = []
+    for _ in range(1000):
+        start = time.time()
+        response = requests.post(
+            base_url + "/read", json=generator.generate_random_payload(endpoint="/read"))
+        if response.status_code != 200:
+            print("Error:", response.text)
+        end = time.time()
+        read_time.append(end - start)
+
+    return read_time
+
+def launch_write_requests():
+    write_time = []
+    for _ in range(1000):
+        start = time.time()
+        response = requests.post(
+            base_url + "/write", json=generator.generate_random_payload(endpoint="/write"))
+        if response.status_code != 200:
+            print("Error:", response.text)
+        end = time.time()
+        write_time.append(end - start)
+
+    return write_time
