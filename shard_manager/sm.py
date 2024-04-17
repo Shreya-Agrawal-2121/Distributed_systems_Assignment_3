@@ -35,7 +35,7 @@ def send_heartbeats(*args):
             result = cursor.fetchall()
             if len(result) == 0:
                 break
-            client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id})
+            client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id,  'SERVER_NAME': name})
             server = client.containers.get(name)
             ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
             cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{name}'")
@@ -77,6 +77,8 @@ def send_heartbeats(*args):
             #TODO: update server contents
             container = client.containers.get(server)
             container.restart()
+            ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            requests.post(f"http://{ip_addr}:5000/replay",json={})
             print(f"Server {name} is down, restarting")
 
 @app.route('/primary_elect', methods=['GET'])

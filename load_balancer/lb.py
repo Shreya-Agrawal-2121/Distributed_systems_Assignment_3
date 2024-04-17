@@ -44,29 +44,23 @@ def write_to_servers(*args):
     data = args[1]
     lock = locks[shard]
     lock.acquire()
-    valid_id = 0
-    shd = None
-    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'")
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}'  AND Primary_server = 1")
     result = cursor.fetchall()
-    cnx.commit()
-    servers = [row[0] for row in result]
-    for server in servers:
-        try:
-            container = client.containers.get(server)
-            ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
-            url_redirect = f'http://{ip_addr}:5000/write'
-            request_data = {
-                "shard": shard,
-                "data": data
-            }
-            requests.post(url_redirect, json=request_data)
-            time.sleep(1)
-        except Exception as e:
-            print(e)
-            lock.release()
-            response_data = {'message': '<Error> Failed to write to server', 
+    if len(result) == 0:
+        lock.release()
+        return
+    server = result[0][0]
+    try:
+        container = client.containers.get(server)
+        ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
+        url_redirect = f'http://{ip_addr}:5000/write'
+        requests.post(url_redirect, json={"data":data})
+    except Exception as e:
+        print(e)
+        response_data = {'message': '<Error> Failed to write to server', 
                         'status': 'failure'}
-            return jsonify(response_data), 400
+        lock.release()
+        return jsonify(response_data), 400
     lock.release()
 
 @app.route('/init', methods=['POST'])
@@ -514,7 +508,7 @@ def update():
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'")
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}' and Primary_server = 1")
     result = cursor.fetchall()
     servers = [row[0] for row in result]
     print(servers)
@@ -570,7 +564,7 @@ def delete():
             "status" : "failed"
         }
         return jsonify(response_data), 400
-    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}'")
+    cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{req_shard}' and Primary_server = 1")
     result = cursor.fetchall()
     servers = [row[0] for row in result]
     for server in servers:

@@ -39,6 +39,11 @@ def query(sql, database):
     mydb.commit()
     return res
 
+def commitTransactions(*args):
+    pass
+@app.route('/replay', methods=['POST'])
+def replay_tnx():
+    pass
 
 @app.route('/config', methods=['POST'])
 def config():
@@ -181,7 +186,10 @@ def write():
     shard = data['shard']
     stud_data = data['data']
     shard_db = f"{shard}.db"
-    
+    is_primary_server = 0
+    cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
+    result = cursor.fetchall()
+    is_primary_server = result[0][0]
     if is_primary_server == 1:
         # send request with shard_id to shard manager for secondary server list
         response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
@@ -239,7 +247,10 @@ def update():
     shard = data['shard']
     stud_id = data['Stud_id']
     data = data['data']
-
+    is_primary_server = 0
+    cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
+    result = cursor.fetchall()
+    is_primary_server = result[0][0]
     # check if student id matches with new data
     if list(data.values())[0] != stud_id:
         response_data = {
@@ -326,7 +337,10 @@ def delete():
     #     return (response_data), 500
 
     shard_db = f"{shard}.db"
-    
+    is_primary_server = 0
+    cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
+    result = cursor.fetchall()
+    is_primary_server = result[0][0]
     if is_primary_server == 1:
         # send request with shard_id to shard manager for secondary server list
         response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
