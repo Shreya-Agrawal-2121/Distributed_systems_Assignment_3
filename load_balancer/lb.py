@@ -92,7 +92,9 @@ def init_server():
             keys.append(server)
         try:
                 client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id, 'SERVER_NAME': server,
-                }, ports={5000:None})
+                }, ports={5000:None},
+                privileged=True,
+                volumes={'/var/run/docker.sock': {'bind': '/var/run/docker.sock', 'mode': 'rw'}})
         except Exception as e:
                 print(e)
                 response = {'message': '<Error> Failed to spawn new container', 
@@ -465,10 +467,13 @@ def write():
                     writes[shard_id].append(entry)
                 break
         cnt += 1
+    threads = []
     for shard in writes.keys():
         thread = Thread(target=write_to_servers, args=(shard, writes[shard]))
+        threads.append(thread)
         thread.start()
-
+    for thread in threads:
+        thread.join()
 
     response_data = {
         "message" : "{} Data entries added".format(cnt),

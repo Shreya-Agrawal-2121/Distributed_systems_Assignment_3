@@ -4,6 +4,8 @@ import docker
 import requests
 import sqlite3
 import mysql.connector
+import asyncio
+import aiohttp
 client = docker.from_env()
 network = "n1"
 image = "server"
@@ -11,8 +13,10 @@ mysql_container = client.containers.get("mysql_db")
 mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
 cnx = mysql.connector.connect(user='root', password='test',
                               host=mysql_ip,
-                              database='meta_data')
+                              )
 cursor = cnx.cursor()
+cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
+cursor.execute("USE meta_data")
 app = Flask(__name__)
 
 # Get server ID from environment variable
@@ -24,6 +28,65 @@ column_list = ""
 columns = []
 dtypes = []
 # Home endpoint
+async def write_to_secondary(shard, data):
+    sm = client.containers.get("sm")
+    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+    response = requests.get(f"http://{sm_ip}:5001/secondary?shard={shard}")
+    secondary_servers = response.json()
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+
+        for server in secondary_servers:
+            # send data to secondary servers
+            serv = client.containers.get(server)
+            server_ip = serv.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            tasks.append(asyncio.create_task(session.post(
+                f'http://{server_ip}:5000/write', json=data)))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        cnt = 0
+        for result in results:
+            if not isinstance(result, Exception) and result.status == 200:
+                cnt += 1
+            else:
+                app.logger.error(
+                    f"Error while writing to secondary server: {result}")
+        if cnt < len(secondary_servers)/2:
+            # how to remove the successful writes #TODO
+            response_data = {
+                "message": "Write failed to secondary servers",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+    shard_db = f"{shard}.db"
+    query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
+    cnt = 0
+    # open the log and make changes to be made in the log_file serve_id.log
+    with open(f"{server_id}.log", "a") as log_file:
+        for row in data:
+            # check if student id exists
+            values = list(row.values())
+            result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
+            if len(result) == 0:
+                # also mention shard_id in the log file
+                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
+                query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
+                cnt += 1
+        log_file.close()
+
+    query(f"DETACH DATABASE '{shard}'", shard_db)
+    mydb.close()
+    response_data = {
+        "message": "Data entries added",
+        "status": "success"
+    }
+    if cnt==0:
+        response_data = {
+            "message": "All Data entries already exists",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+    return jsonify(response_data), 200
+    
 def query(sql, database):
     global mydb
     try:
@@ -139,7 +202,7 @@ def copy():
         response_message[shard] = response
     response_message["status"] = "successful"    
     return jsonify(response_message), 200
-
+    
 
 
 @app.route('/read', methods=['POST'])
@@ -180,34 +243,26 @@ def read():
 
 
 @app.route('/write', methods=['POST'])
-def write():
+async def write():
     global columns, dtypes, column_list, is_primary_server
     data = request.get_json()
     shard = data['shard']
     stud_data = data['data']
     shard_db = f"{shard}.db"
     is_primary_server = 0
+    sm = client.containers.get("sm")
+    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
     cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
     result = cursor.fetchall()
     is_primary_server = result[0][0]
     if is_primary_server == 1:
-        # send request with shard_id to shard manager for secondary server list
-        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
-        secondary_servers = response.json()
-        maj_cnt=0
-        for server in secondary_servers:
-            # send data to secondary servers
-            requests.post(f"http://{server}/write", json=data)
-            # check if successful
-            if response.status_code == 200:
-                maj_cnt += 1
-        if maj_cnt < len(secondary_servers)/2:
-            # how to remove the successful writes #TODO
-            response_data = {
-                "message": "Write failed",
-                "status": "failed"
-            }
-            return jsonify(response_data), 500
+        with open(f"{server_id}.log", "a") as log_file:
+            for row in stud_data:
+                # check if student id exists
+                values = list(row.values())
+                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
+        log_file.close()
+        return await write_to_secondary(shard, stud_data)
     
     query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
     cnt = 0
@@ -274,12 +329,16 @@ def update():
 
     if is_primary_server == 1:
         # send request with shard_id to shard manager for secondary server list
-        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
+        sm = client.containers.get("sm")
+        sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+        response = requests.get(f"http://{sm_ip}:5001/secondary?shard={shard}")
         secondary_servers = response.json()
         maj_cnt=0
         for server in secondary_servers:
             # send data to secondary servers
-            requests.put(f"http://{server}/update", json=data)
+            serv = client.containers.get(server)
+            server_ip = serv.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            requests.post(f"http://{server_ip}:5000/write", json=data)
             # check if successful
             if response.status_code == 200:
                 maj_cnt += 1
@@ -338,17 +397,21 @@ def delete():
 
     shard_db = f"{shard}.db"
     is_primary_server = 0
+    sm = client.containers.get("sm")
+    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
     cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
     result = cursor.fetchall()
     is_primary_server = result[0][0]
     if is_primary_server == 1:
         # send request with shard_id to shard manager for secondary server list
-        response = requests.get(f"http://localhost:5001/secondary?shard={shard}")
+        response = requests.get(f"http://{sm_ip}:5001/secondary?shard={shard}")
         secondary_servers = response.json()
         maj_cnt=0
         for server in secondary_servers:
             # send data to secondary servers
-            requests.delete(f"http://{server}/del", json=data)
+            serv = client.containers.get(server)
+            server_ip = serv.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            requests.post(f"http://{server_ip}:5000/write", json=data)
             # check if successful
             if response.status_code == 200:
                 maj_cnt += 1

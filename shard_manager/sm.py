@@ -14,8 +14,11 @@ mysql_container = client.containers.get("mysql_db")
 mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
 cnx = mysql.connector.connect(user='root', password='test',
                               host=mysql_ip,
-                              database='meta_data')
+                                )
+
 cursor = cnx.cursor()
+cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
+cursor.execute("USE meta_data")
 all_threads = {}
 def send_heartbeats(*args):
     name = args[0]
@@ -106,7 +109,7 @@ def add_server():
     return jsonify({"status": "successful", "message": "Server added"}), 200
 
 
-@app.route('secondary', methods=['GET'])
+@app.route('/secondary', methods=['GET'])
 def get_secondary_servers():
     shard = request.args.get("shard")
     try:
@@ -118,4 +121,4 @@ def get_secondary_servers():
         return jsonify({"status": "failed", "message": "Error retrieving secondary servers"}), 400
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)

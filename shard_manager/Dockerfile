@@ -1,5 +1,5 @@
 FROM ubuntu:20.04
-WORKDIR /lb
+WORKDIR /sm
 
 RUN apt-get update
 RUN apt-get install -y python3 python3-pip
@@ -12,4 +12,4 @@ RUN  apt-get install -y sqlite3 libsqlite3-dev
 COPY . .
 
 EXPOSE 5000
-CMD ["python3", "lb.py"]
+CMD ["python3", "sm.py"]
