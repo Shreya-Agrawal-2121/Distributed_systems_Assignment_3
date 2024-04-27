@@ -6,6 +6,7 @@ RUN pip install --upgrade pip setuptools wheel
 EXPOSE 5000
 COPY requirements.txt .
 RUN pip install  -r requirements.txt
+RUN pip install flask[async]
 RUN  apt-get install -y sqlite3 libsqlite3-dev
 
 COPY . .

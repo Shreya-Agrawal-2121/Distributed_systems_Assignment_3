@@ -54,7 +54,7 @@ def write_to_servers(*args):
         container = client.containers.get(server)
         ip_addr = container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
         url_redirect = f'http://{ip_addr}:5000/write'
-        requests.post(url_redirect, json={"data":data})
+        requests.post(url_redirect, json={"data":data,"shard":shard})
     except Exception as e:
         print(e)
         response_data = {'message': '<Error> Failed to write to server', 
@@ -110,7 +110,11 @@ def init_server():
         i += 1
         time.sleep(1)
     cnx.commit()
+    sm = client.containers.get("sm")
+    sm_ip = sm.attrs["NetworkSettings"]["Networks"][network]["IPAddress"]
     for server in keys:
+        server_id = server_host_to_id[server]
+        
         post_data = {
             "schema": schema,
             "shards": servers[server]
@@ -128,6 +132,19 @@ def init_server():
                         'status': 'failure'}
             
             return jsonify(response_data), 400
+        try:
+            send_data = {
+                "server_id": server_id,
+                "server_name": server
+            }
+            url_redirect = f'http://{sm_ip}:5001/add_server'
+            requests.post(url_redirect, json=send_data)
+            time.sleep(1)
+        except Exception as e:
+            print(e)
+            response_data = {'message': '<Error> Failed to redirect request', 
+                        'status': 'failure'}
+            return jsonify(response_data), 400
         time.sleep(1)
     for shard in shards:
         values = list(shard.values())
@@ -141,6 +158,8 @@ def init_server():
         print(result)
         if len(result) == 0:
             continue
+        server_first = result[0][0]
+        cursor.execute(f"UPDATE MapT SET Primary_server = 1 WHERE Shard_id = '{shard_id}' AND Server_id = '{server_first}'")
         for row in result:
             server_id = server_host_to_id[row[0]]
             cmap.add_server(server_id)
@@ -593,7 +612,10 @@ def delete():
         "status":"success"
     }
     return jsonify(response_data), 200
-
+@app.route('/get_schema', methods=['GET'])
+def get_schema():
+    response = {"schema":schema}
+    return jsonify(response), 200
 # # route /<path:path>
 # @app.route('/<path:path>', methods=['GET'])
 # def redirect_request(path='home'):

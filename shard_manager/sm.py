@@ -15,7 +15,8 @@ mysql_ip = mysql_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress
 cnx = mysql.connector.connect(user='root', password='test',
                               host=mysql_ip,
                                 )
-
+lb_container = client.containers.get("lb")
+lb_ip = lb_container.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
 cursor = cnx.cursor()
 cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
 cursor.execute("USE meta_data")
@@ -38,14 +39,21 @@ def send_heartbeats(*args):
             result = cursor.fetchall()
             if len(result) == 0:
                 break
-            client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id,  'SERVER_NAME': name})
+            client.containers.run(image=image, name=server, network=network, detach=True, environment={'SERVER_ID': server_id,  'SERVER_NAME': name},
+                                  privileged=True,
+                volumes={'/var/run/docker.sock': {'bind': '/var/run/docker.sock', 'mode': 'rw'}})
             server = client.containers.get(name)
             ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            response = request.get(f'http://{lb_ip}:5000/get_server')
+            response = response.json()
+            schema = response['schema']
             cursor.execute(f"SELECT Shard_id FROM MapT WHERE Server_id = '{name}'")
             result = cursor.fetchall()
             servers = {}
+            shards = []
             for row in result:
                 shard = row[0]
+                shards.append(shard)
                 cursor.execute(f"SELECT Server_id FROM MapT WHERE Shard_id = '{shard}' AND Server_id != '{name}'")
                 res = cursor.fetchone()
                 if len(res) > 0:
@@ -54,6 +62,11 @@ def send_heartbeats(*args):
                         servers[serv] = [shard]
                     else:
                         servers[serv].append(shard)
+            post_data = {
+                "schema":schema,
+                "shards":shards
+            }
+            requests.post(f"http://{ip_addr}:5000/config",json=post_data)
             for serv in servers.keys():
                 cont = client.containers.get(serv)
                 ip = cont.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
@@ -80,8 +93,8 @@ def send_heartbeats(*args):
             #TODO: update server contents
             container = client.containers.get(server)
             container.restart()
-            ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
-            requests.post(f"http://{ip_addr}:5000/replay",json={})
+            # ip_addr = server.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            # requests.post(f"http://{ip_addr}:5000/replay",json={})
             print(f"Server {name} is down, restarting")
 
 @app.route('/primary_elect', methods=['GET'])

@@ -1,5 +1,6 @@
 build:
 	sudo docker-compose build
+	docker network inspect n1 >/dev/null 2>&1 || docker network create --driver bridge n1
 	sudo docker run --name mysql_db --hostname mysql_db --network n1 -e MYSQL_ROOT_PASSWORD=test -d mysql:latest
 run_lb:
 	sudo docker-compose up -d sm

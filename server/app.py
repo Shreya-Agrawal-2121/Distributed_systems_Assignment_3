@@ -18,7 +18,7 @@ cursor = cnx.cursor()
 cursor.execute("CREATE DATABASE IF NOT EXISTS meta_data")
 cursor.execute("USE meta_data")
 app = Flask(__name__)
-
+log = 0
 # Get server ID from environment variable
 server_id = os.environ.get('SERVER_ID')
 server_name = os.environ.get('SERVER_NAME')
@@ -27,66 +27,7 @@ db = []
 column_list = ""
 columns = []
 dtypes = []
-# Home endpoint
-async def write_to_secondary(shard, data):
-    sm = client.containers.get("sm")
-    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
-    response = requests.get(f"http://{sm_ip}:5001/secondary?shard={shard}")
-    secondary_servers = response.json()
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-
-        for server in secondary_servers:
-            # send data to secondary servers
-            serv = client.containers.get(server)
-            server_ip = serv.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
-            tasks.append(asyncio.create_task(session.post(
-                f'http://{server_ip}:5000/write', json=data)))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        cnt = 0
-        for result in results:
-            if not isinstance(result, Exception) and result.status == 200:
-                cnt += 1
-            else:
-                app.logger.error(
-                    f"Error while writing to secondary server: {result}")
-        if cnt < len(secondary_servers)/2:
-            # how to remove the successful writes #TODO
-            response_data = {
-                "message": "Write failed to secondary servers",
-                "status": "failed"
-            }
-            return jsonify(response_data), 500
-    shard_db = f"{shard}.db"
-    query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
-    cnt = 0
-    # open the log and make changes to be made in the log_file serve_id.log
-    with open(f"{server_id}.log", "a") as log_file:
-        for row in data:
-            # check if student id exists
-            values = list(row.values())
-            result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
-            if len(result) == 0:
-                # also mention shard_id in the log file
-                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
-                query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
-                cnt += 1
-        log_file.close()
-
-    query(f"DETACH DATABASE '{shard}'", shard_db)
-    mydb.close()
-    response_data = {
-        "message": "Data entries added",
-        "status": "success"
-    }
-    if cnt==0:
-        response_data = {
-            "message": "All Data entries already exists",
-            "status": "failed"
-        }
-        return jsonify(response_data), 500
-    return jsonify(response_data), 200
-    
+WALs = {}
 def query(sql, database):
     global mydb
     try:
@@ -101,12 +42,105 @@ def query(sql, database):
     cursor.close()
     mydb.commit()
     return res
+# Home endpoint
+async def write_to_primary(shard, data):
+    sm = client.containers.get("sm")
+    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+    response = requests.get(f"http://{sm_ip}:5001/secondary?shard={shard}")
+    secondary_servers = response.json()
+    WAL_p = WALs[shard]
+    send_data = {
+        "shard":shard,
+        "is_primary_server":0,
+        "WAL_p":WAL_p
+    }
+    async with aiohttp.ClientSession() as session:
+        tasks = []
 
-def commitTransactions(*args):
-    pass
-@app.route('/replay', methods=['POST'])
-def replay_tnx():
-    pass
+        for server in secondary_servers:
+            # send data to secondary servers
+            serv = client.containers.get(server)
+            server_ip = serv.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
+            tasks.append(asyncio.create_task(session.post(
+                f'http://{server_ip}:5000/write', json=send_data)))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        cnt = 0
+        for result in results:
+            if not isinstance(result, Exception) and result.status == 200:
+                cnt += 1
+            else:
+                app.logger.error(
+                    f"Error while writing to secondary server: {result}")
+        if cnt < len(secondary_servers)/2:
+            response_data = {
+                "message": "Write failed to secondary servers",
+                "status": "failed"
+            }
+            return jsonify(response_data), 500
+    shard_db = f"{shard}.db"
+    query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
+    cnt = 0
+    # open the log and make changes to be made in the log_file serve_id.log
+    for row in data:
+        # check if student id exists
+        values = list(row.values())
+        result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
+        if len(result) == 0:
+            # also mention shard_id in the log file
+            query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
+            cnt += 1
+    query(f"DETACH DATABASE '{shard}'", shard_db)
+    mydb.close()
+    response_data = {
+        "message": "Data entries added",
+        "status": "success"
+    }
+    if cnt==0:
+        response_data = {
+            "message": "All Data entries already exists",
+            "status": "failed"
+        }
+        return jsonify(response_data), 500
+    return jsonify(response_data), 200
+    
+def execute_tranx(entry, shard):
+    shard_db = f"{shard}.db"
+    if entry['type'] == 'write':
+        data = entry['data']
+        cnt = 0
+        for row in data:
+        # check if student id exists
+            values = list(row.values())
+            result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
+            if len(result) == 0:
+                # also mention shard_id in the log file
+                query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
+                cnt += 1
+
+async def write_to_secondary(shard, WAL_p):
+    WAL = WALs[shard]
+    shard_db = f"{shard}.db"
+    query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
+    for idx,entry in enumerate(WAL):
+        if WAL['log'] >= WAL_p[0]['log']:
+            WAL = WAL[idx:]
+            break
+    if len(WAL) > 0 and WAL[-1]['log'] < WAL_p[0]['log']:
+        WAL = []
+    WALs[shard] = WAL
+    greater_idx = -1
+    for idx, entry in enumerate(WAL_p):
+        if len(WAL) == 0 or WAL[-1]['log'] < entry['log']:
+            greater_idx = idx
+            break
+    if greater_idx != -1:
+        new_logs = WAL_p[greater_idx:]
+        for entry in new_logs:
+            WAL.append(entry)
+            execute_tranx(entry=entry)
+    WALs[shard] = WAL
+    query(f"DETACH DATABASE '{shard}'", shard_db)
+    return jsonify({"message":"All operations executed successfully", "status":"successful"}), 200
 
 @app.route('/config', methods=['POST'])
 def config():
@@ -247,51 +281,25 @@ async def write():
     global columns, dtypes, column_list, is_primary_server
     data = request.get_json()
     shard = data['shard']
-    stud_data = data['data']
+    stud_data = None
+    if 'data' in data.keys():
+        stud_data = data['data']
     shard_db = f"{shard}.db"
-    is_primary_server = 0
-    sm = client.containers.get("sm")
-    sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
-    cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
-    result = cursor.fetchall()
-    is_primary_server = result[0][0]
-    if is_primary_server == 1:
-        with open(f"{server_id}.log", "a") as log_file:
-            for row in stud_data:
-                # check if student id exists
-                values = list(row.values())
-                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
-        log_file.close()
-        return await write_to_secondary(shard, stud_data)
+    is_primary_server = None
+    WAL_p = None
+    if 'is_primary_server' in data.keys():
+        is_primary_server = data['is_primary_server']
+    if 'WAL_p' in data.keys():
+        WAL_p = data['WAL_p']
+    if is_primary_server is None:
+        if shard in WALs.keys():
+            WALs[shard].append({'log':log,'type':'write','data':data})
+        else:
+            WALs[shard] = []
+            WALs[shard].append({'log':log,'type':'write','data':data})
+        return await write_to_primary(shard, stud_data)
     
-    query(f"ATTACH DATABASE '{shard_db}' as '{shard}'", shard_db)
-    cnt = 0
-    # open the log and make changes to be made in the log_file serve_id.log
-    with open(f"{server_id}.log", "a") as log_file:
-        for row in stud_data:
-            # check if student id exists
-            values = list(row.values())
-            result = query(f"SELECT {column_list} FROM StudT WHERE Stud_id = {values[0]}", shard_db)
-            if len(result) == 0:
-                # also mention shard_id in the log file
-                log_file.write(f"{shard}: INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}\n")
-                query(f"INSERT INTO StudT {tuple(columns)} VALUES {tuple(values)}", shard_db)
-                cnt += 1
-        log_file.close()
-
-    query(f"DETACH DATABASE '{shard}'", shard_db)
-    mydb.close()
-    response_data = {
-        "message": "Data entries added",
-        "status": "success"
-    }
-    if cnt==0:
-        response_data = {
-            "message": "All Data entries already exists",
-            "status": "failed"
-        }
-        return jsonify(response_data), 500
-    return jsonify(response_data), 200
+    return await write_to_secondary(shard, WAL_p)
 
 
 @app.route('/update', methods=['PUT'])
@@ -302,10 +310,7 @@ def update():
     shard = data['shard']
     stud_id = data['Stud_id']
     data = data['data']
-    is_primary_server = 0
-    cursor.execute(f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard}' AND Server_id = '{server_id}'")
-    result = cursor.fetchall()
-    is_primary_server = result[0][0]
+    is_primary_server = data['is_primary_server']
     # check if student id matches with new data
     if list(data.values())[0] != stud_id:
         response_data = {
@@ -327,7 +332,7 @@ def update():
     shard_db = f"{shard}.db"
     
 
-    if is_primary_server == 1:
+    if is_primary_server is None:
         # send request with shard_id to shard manager for secondary server list
         sm = client.containers.get("sm")
         sm_ip = sm.attrs["NetworkSettings"]["Networks"]["n1"]["IPAddress"]
